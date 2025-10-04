@@ -125,13 +125,16 @@ jobs:
           # Create PR
           gh pr create \
             --title "chore: update Homebrew formula to ${VERSION}" \
-            --body "Auto-generated PR to update Homebrew formula after release ${VERSION}
+            --body "$(cat <<EOF
+Auto-generated PR to update Homebrew formula after release ${VERSION}
 
 **Changes:**
 - Version: ${VERSION#v}
-- ARM64 SHA256: \`${AARCH64_SHA256}\`
-- x86_64 SHA256: \`${X86_64_SHA256}\`
+- ARM64 SHA256: ${AARCH64_SHA256}
+- x86_64 SHA256: ${X86_64_SHA256}
 
-This PR was automatically created by the release workflow." \
+This PR was automatically created by the release workflow.
+EOF
+)" \
             --base master \
             --head "${BRANCH_NAME}"
