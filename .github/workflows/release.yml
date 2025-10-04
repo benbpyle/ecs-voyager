@@ -113,12 +113,11 @@ jobs:
 
           # Commit and push
           git add Formula/ecs-voyager.rb
-          git commit -m "chore: update Homebrew formula to ${VERSION}
-
-Auto-updated by release workflow:
-- Version: ${VERSION#v}
-- ARM64 SHA256: ${AARCH64_SHA256}
-- x86_64 SHA256: ${X86_64_SHA256}"
+          git commit -m "chore: update Homebrew formula to ${VERSION}" \
+                     -m "Auto-updated by release workflow:" \
+                     -m "- Version: ${VERSION#v}" \
+                     -m "- ARM64 SHA256: ${AARCH64_SHA256}" \
+                     -m "- x86_64 SHA256: ${X86_64_SHA256}"
 
           # Pull latest changes to avoid conflicts
           git pull --rebase origin master || true
