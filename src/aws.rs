@@ -502,11 +502,11 @@ impl EcsClient {
 
         for event in resp.events() {
             if let (Some(timestamp), Some(message)) = (event.timestamp(), event.message()) {
-                logs.push(LogEntry {
+                logs.push(LogEntry::new(
                     timestamp,
-                    message: message.to_string(),
-                    container_name: container_name.to_string(),
-                });
+                    message.to_string(),
+                    container_name.to_string(),
+                ));
             }
         }
 
@@ -629,11 +629,7 @@ mod tests {
     // Test LogEntry construction and ordering
     #[test]
     fn test_log_entry_creation() {
-        let log = LogEntry {
-            timestamp: 1234567890,
-            message: "Test log message".to_string(),
-            container_name: "web".to_string(),
-        };
+        let log = LogEntry::new(1234567890, "Test log message".to_string(), "web".to_string());
 
         assert_eq!(log.timestamp, 1234567890);
         assert_eq!(log.message, "Test log message");
@@ -643,21 +639,9 @@ mod tests {
     #[test]
     fn test_log_entries_sorting() {
         let mut logs = vec![
-            LogEntry {
-                timestamp: 3000,
-                message: "third".to_string(),
-                container_name: "web".to_string(),
-            },
-            LogEntry {
-                timestamp: 1000,
-                message: "first".to_string(),
-                container_name: "web".to_string(),
-            },
-            LogEntry {
-                timestamp: 2000,
-                message: "second".to_string(),
-                container_name: "web".to_string(),
-            },
+            LogEntry::new(3000, "third".to_string(), "web".to_string()),
+            LogEntry::new(1000, "first".to_string(), "web".to_string()),
+            LogEntry::new(2000, "second".to_string(), "web".to_string()),
         ];
 
         logs.sort_by_key(|log| log.timestamp);
@@ -673,16 +657,8 @@ mod tests {
     #[test]
     fn test_log_entries_with_same_timestamp() {
         let mut logs = vec![
-            LogEntry {
-                timestamp: 1000,
-                message: "log A".to_string(),
-                container_name: "container1".to_string(),
-            },
-            LogEntry {
-                timestamp: 1000,
-                message: "log B".to_string(),
-                container_name: "container2".to_string(),
-            },
+            LogEntry::new(1000, "log A".to_string(), "container1".to_string()),
+            LogEntry::new(1000, "log B".to_string(), "container2".to_string()),
         ];
 
         logs.sort_by_key(|log| log.timestamp);
@@ -797,21 +773,9 @@ mod tests {
     #[test]
     fn test_multiple_container_logs() {
         let logs = vec![
-            LogEntry {
-                timestamp: 1000,
-                message: "Web server started".to_string(),
-                container_name: "web".to_string(),
-            },
-            LogEntry {
-                timestamp: 2000,
-                message: "Database connected".to_string(),
-                container_name: "db".to_string(),
-            },
-            LogEntry {
-                timestamp: 3000,
-                message: "Cache initialized".to_string(),
-                container_name: "redis".to_string(),
-            },
+            LogEntry::new(1000, "Web server started".to_string(), "web".to_string()),
+            LogEntry::new(2000, "Database connected".to_string(), "db".to_string()),
+            LogEntry::new(3000, "Cache initialized".to_string(), "redis".to_string()),
         ];
 
         assert_eq!(logs.len(), 3);
@@ -854,16 +818,8 @@ mod tests {
 
     #[test]
     fn test_log_timestamp_ordering() {
-        let log1 = LogEntry {
-            timestamp: 1000,
-            message: "first".to_string(),
-            container_name: "web".to_string(),
-        };
-        let log2 = LogEntry {
-            timestamp: 2000,
-            message: "second".to_string(),
-            container_name: "web".to_string(),
-        };
+        let log1 = LogEntry::new(1000, "first".to_string(), "web".to_string());
+        let log2 = LogEntry::new(2000, "second".to_string(), "web".to_string());
 
         assert!(log1.timestamp < log2.timestamp);
     }
@@ -904,11 +860,7 @@ mod tests {
 
     #[test]
     fn test_log_entry_debug() {
-        let log = LogEntry {
-            timestamp: 123,
-            message: "test message".to_string(),
-            container_name: "web".to_string(),
-        };
+        let log = LogEntry::new(123, "test message".to_string(), "web".to_string());
 
         let debug_string = format!("{:?}", log);
         assert!(debug_string.contains("test message"));

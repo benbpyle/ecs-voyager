@@ -460,8 +460,15 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App) {
 /// * `area` - The rectangular area allocated for the logs view
 /// * `app` - The application state containing log entries
 fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
-    if app.logs.is_empty() {
-        let no_logs = Paragraph::new("No logs available for this task.\n\nThis could mean:\n- The task has no CloudWatch Logs configured\n- The log stream hasn't been created yet\n- The task hasn't produced any logs")
+    // Get filtered logs
+    let filtered_logs = app.get_filtered_logs();
+
+    if filtered_logs.is_empty() {
+        let no_logs = if !app.log_search_query.is_empty() || app.log_level_filter.is_some() {
+            Paragraph::new("No logs match the current search/filter criteria.\n\nTry:\n- Press Esc to clear search\n- Press 'f' to cycle through log level filters")
+        } else {
+            Paragraph::new("No logs available for this task.\n\nThis could mean:\n- The task has no CloudWatch Logs configured\n- The log stream hasn't been created yet\n- The task hasn't produced any logs")
+        }
             .style(Style::default().fg(Color::Yellow))
             .block(
                 Block::default()
@@ -475,7 +482,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 
     // Calculate visible window
     let available_height = area.height.saturating_sub(2) as usize; // Account for borders
-    let total_logs = app.logs.len();
+    let total_logs = filtered_logs.len();
 
     // Determine which logs to show based on scroll position
     let start_idx = if app.auto_tail {
@@ -487,7 +494,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     let end_idx = (start_idx + available_height).min(total_logs);
 
     // Format log entries as Lines
-    let log_lines: Vec<Line> = app.logs[start_idx..end_idx]
+    let log_lines: Vec<Line> = filtered_logs[start_idx..end_idx]
         .iter()
         .map(|log| {
             // Convert timestamp (milliseconds) to datetime
@@ -521,10 +528,19 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         format!(" [{total_logs}]")
     };
 
+    // Build filter/search status
+    let mut filter_status = String::new();
+    if let Some(ref level) = app.log_level_filter {
+        filter_status.push_str(&format!(" | Filter: {:?}", level));
+    }
+    if !app.log_search_query.is_empty() {
+        filter_status.push_str(&format!(" | Search: '{}'", app.log_search_query));
+    }
+
     let title = if app.auto_tail {
-        format!("Logs{scroll_indicator} (AUTO-TAIL | t:toggle | Esc/h:back | r:refresh)")
+        format!("Logs{scroll_indicator}{filter_status} (AUTO-TAIL | /:search f:filter e:export t:toggle)")
     } else {
-        format!("Logs{scroll_indicator} (↑↓:scroll | t:toggle tail | Esc/h:back | r:refresh)")
+        format!("Logs{scroll_indicator}{filter_status} (↑↓:scroll | /:search f:filter e:export t:toggle)")
     };
 
     let logs_widget = Paragraph::new(log_lines)
@@ -617,7 +633,15 @@ fn draw_help(f: &mut Frame, area: Rect) {
         ]),
         Line::from(vec![
             Span::styled("  /           ", Style::default().fg(Color::Yellow)),
-            Span::raw("Search/Filter current view"),
+            Span::raw("Search/Filter view | Search logs (in Logs view)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  f           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Cycle log level filter (in Logs view)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  e           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Export logs to file (in Logs view)"),
         ]),
         Line::from(vec![
             Span::styled("  x           ", Style::default().fg(Color::Yellow)),
