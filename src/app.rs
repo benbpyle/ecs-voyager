@@ -6,13 +6,13 @@
 use anyhow::Result;
 use std::time::{Duration, Instant};
 
-use crate::aws::EcsClient;
+use crate::aws::{EcsClient, Metrics};
 use crate::config::Config;
 
 /// Represents the current view/screen in the application.
 ///
 /// The application follows a hierarchical navigation pattern:
-/// Clusters -> Services -> Tasks -> Details/Logs
+/// Clusters -> Services -> Tasks -> Details/Logs/Metrics
 #[derive(Debug, Clone, PartialEq)]
 pub enum AppState {
     /// View showing list of ECS clusters
@@ -25,6 +25,8 @@ pub enum AppState {
     Details,
     /// View showing CloudWatch logs for a task
     Logs,
+    /// View showing CloudWatch metrics for a service
+    Metrics,
 }
 
 /// Represents modal dialogs that can be shown over the main view.
@@ -94,6 +96,8 @@ pub struct App {
     pub log_scroll: usize,
     /// Whether to auto-scroll to latest logs
     pub auto_tail: bool,
+    /// CloudWatch metrics for selected service
+    pub metrics: Option<Metrics>,
 
     // Search
     /// Whether search input mode is active
@@ -306,6 +310,7 @@ impl App {
             logs: Vec::new(),
             log_scroll: 0,
             auto_tail: true,
+            metrics: None,
             search_mode: false,
             search_query: String::new(),
             log_search_mode: false,
@@ -353,6 +358,10 @@ impl App {
                 }
                 return;
             }
+            AppState::Metrics => {
+                // No scrolling in metrics view
+                return;
+            }
         };
 
         if len > 0 {
@@ -377,6 +386,10 @@ impl App {
                 // Scroll up in logs
                 self.log_scroll = self.log_scroll.saturating_sub(1);
                 self.auto_tail = false;
+                return;
+            }
+            AppState::Metrics => {
+                // No scrolling in metrics view
                 return;
             }
         };
@@ -431,6 +444,7 @@ impl App {
             }
             AppState::Details => {}
             AppState::Logs => {}
+            AppState::Metrics => {}
         }
         Ok(())
     }
@@ -453,6 +467,10 @@ impl App {
                 self.logs.clear();
                 self.log_scroll = 0;
                 self.auto_tail = true;
+            }
+            AppState::Metrics => {
+                self.set_view(AppState::Services);
+                self.metrics = None;
             }
             AppState::Clusters => {}
         }
@@ -528,6 +546,22 @@ impl App {
                         }
                         Err(e) => {
                             self.status_message = format!("Error loading logs: {e}");
+                        }
+                    }
+                }
+            }
+            AppState::Metrics => {
+                // Refresh metrics if we have a selected service
+                if let (Some(cluster), Some(service)) = (&self.selected_cluster, &self.selected_service) {
+                    self.status_message = "Refreshing metrics...".to_string();
+                    let time_range = self.config.metrics.time_range_minutes;
+                    match self.ecs_client.get_service_metrics(cluster, service, time_range).await {
+                        Ok(metrics) => {
+                            self.metrics = Some(metrics);
+                            self.status_message = "Metrics refreshed".to_string();
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Error loading metrics: {e}");
                         }
                     }
                 }
@@ -834,6 +868,40 @@ impl App {
         Ok(file_path.to_string_lossy().to_string())
     }
 
+    /// Fetches and displays CloudWatch metrics for the selected service.
+    ///
+    /// Retrieves CPU and Memory utilization metrics for the currently selected service
+    /// and switches to the Metrics view.
+    pub async fn view_metrics(&mut self) -> Result<()> {
+        if self.state == AppState::Services {
+            if let Some(service) = self.services.get(self.selected_index) {
+                if let Some(cluster) = &self.selected_cluster {
+                    let service_name = service.name.clone();
+                    let cluster_name = cluster.clone();
+
+                    self.loading = true;
+                    self.status_message = format!("Loading metrics for service: {}", service_name);
+
+                    let time_range = self.config.metrics.time_range_minutes;
+                    self.metrics = self.ecs_client
+                        .get_service_metrics(&cluster_name, &service_name, time_range)
+                        .await
+                        .ok();
+
+                    self.loading = false;
+                    self.set_view(AppState::Metrics);
+
+                    if self.metrics.is_some() {
+                        self.status_message = format!("Metrics loaded for {}", service_name);
+                    } else {
+                        self.status_message = "Failed to load metrics".to_string();
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     // Search methods
     pub fn enter_search_mode(&mut self) {
         self.search_mode = true;
@@ -1089,7 +1157,7 @@ fn list_aws_profiles() -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, AwsConfig, BehaviorConfig, UiConfig};
+    use crate::config::{Config, AwsConfig, BehaviorConfig, UiConfig, LogsConfig, MetricsConfig};
     use std::mem::ManuallyDrop;
 
     // Helper function to create a test config
@@ -1106,6 +1174,17 @@ mod tests {
             },
             ui: UiConfig {
                 theme: "dark".to_string(),
+            },
+            logs: LogsConfig {
+                enable_search: true,
+                enable_filtering: true,
+                show_timestamps: true,
+                export_dir: "~/Downloads".to_string(),
+            },
+            metrics: MetricsConfig {
+                enabled: true,
+                time_range_minutes: 60,
+                refresh_interval: 60,
             },
         }
     }
@@ -1198,8 +1277,12 @@ mod tests {
             logs: vec![],
             log_scroll: 0,
             auto_tail: true,
+            metrics: None,
             search_mode: false,
             search_query: String::new(),
+            log_search_mode: false,
+            log_search_query: String::new(),
+            log_level_filter: None,
             status_message: "Ready".to_string(),
             loading: false,
             last_refresh: Instant::now(),

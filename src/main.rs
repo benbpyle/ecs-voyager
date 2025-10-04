@@ -198,6 +198,7 @@ async fn run_app<B: ratatui::backend::Backend>(
                             KeyCode::Char('r') => app.refresh().await?,
                             KeyCode::Char('d') => app.describe().await?,
                             KeyCode::Char('l') => app.view_logs().await?,
+                            KeyCode::Char('m') => app.view_metrics().await?,
                             KeyCode::Char('t') => app.toggle_auto_tail(),
                             KeyCode::Char('x') => app.execute_action().await?,
                             _ => {}
