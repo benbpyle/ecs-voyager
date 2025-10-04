@@ -76,7 +76,7 @@ impl EcsClient {
             .iter()
             .map(|arn| {
                 // Extract cluster name from ARN
-                arn.split('/').last().unwrap_or(arn).to_string()
+                arn.split('/').next_back().unwrap_or(arn).to_string()
             })
             .collect();
 
@@ -193,11 +193,11 @@ impl EcsClient {
             .iter()
             .map(|t| {
                 let task_arn = t.task_arn().unwrap_or("unknown").to_string();
-                let task_id = task_arn.split('/').last().unwrap_or("unknown").to_string();
+                let task_id = task_arn.split('/').next_back().unwrap_or("unknown").to_string();
                 let status = t.last_status().unwrap_or("unknown").to_string();
                 let desired_status = t.desired_status().unwrap_or("unknown").to_string();
                 let container_instance = t.container_instance_arn()
-                    .and_then(|ci| ci.split('/').last())
+                    .and_then(|ci| ci.split('/').next_back())
                     .unwrap_or("none")
                     .to_string();
                 let cpu = t.cpu().unwrap_or("unknown").to_string();
@@ -245,7 +245,7 @@ impl EcsClient {
 
         // Format the response manually since AWS types don't implement Serialize
         let mut output = String::new();
-        output.push_str(&format!("Cluster: {}\n\n", cluster));
+        output.push_str(&format!("Cluster: {cluster}\n\n"));
 
         for svc in resp.services() {
             output.push_str(&format!("Service Name: {}\n", svc.service_name().unwrap_or("N/A")));
@@ -256,7 +256,7 @@ impl EcsClient {
             output.push_str(&format!("Pending Count: {}\n", svc.pending_count()));
             output.push_str(&format!("Launch Type: {}\n", svc.launch_type().map(|lt| lt.as_str()).unwrap_or("N/A")));
             output.push_str(&format!("Task Definition: {}\n", svc.task_definition().unwrap_or("N/A")));
-            output.push_str("\n");
+            output.push('\n');
         }
 
         Ok(output)
@@ -290,7 +290,7 @@ impl EcsClient {
 
         // Format the response manually since AWS types don't implement Serialize
         let mut output = String::new();
-        output.push_str(&format!("Cluster: {}\n\n", cluster));
+        output.push_str(&format!("Cluster: {cluster}\n\n"));
 
         for task in resp.tasks() {
             output.push_str(&format!("Task ARN: {}\n", task.task_arn().unwrap_or("N/A")));
@@ -307,10 +307,10 @@ impl EcsClient {
                 output.push_str(&format!("    Image: {}\n", container.image().unwrap_or("N/A")));
                 output.push_str(&format!("    Last Status: {}\n", container.last_status().unwrap_or("N/A")));
                 if let Some(exit_code) = container.exit_code() {
-                    output.push_str(&format!("    Exit Code: {}\n", exit_code));
+                    output.push_str(&format!("    Exit Code: {exit_code}\n"));
                 }
             }
-            output.push_str("\n");
+            output.push('\n');
         }
 
         Ok(output)
@@ -421,7 +421,7 @@ impl EcsClient {
 
                 if let Some(task_definition) = task_def_resp.task_definition() {
                     // Extract task ID from ARN for log stream name
-                    let task_id = task_arn.split('/').last().unwrap_or(task_arn);
+                    let task_id = task_arn.split('/').next_back().unwrap_or(task_arn);
 
                     // Iterate through containers to get logs from each
                     for container_def in task_definition.container_definitions() {
@@ -439,14 +439,14 @@ impl EcsClient {
                                             .unwrap_or("ecs");
 
                                         // Construct log stream name
-                                        let log_stream = format!("{}/{}/{}", stream_prefix, container_name, task_id);
+                                        let log_stream = format!("{stream_prefix}/{container_name}/{task_id}");
 
                                         // Fetch logs from CloudWatch Logs
                                         match self.fetch_logs_from_stream(log_group, &log_stream, container_name).await {
                                             Ok(mut logs) => all_logs.append(&mut logs),
                                             Err(e) => {
                                                 // Log stream might not exist yet or other error - continue with other containers
-                                                eprintln!("Failed to fetch logs for container {}: {}", container_name, e);
+                                                eprintln!("Failed to fetch logs for container {container_name}: {e}");
                                             }
                                         }
                                     }

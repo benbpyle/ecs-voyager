@@ -13,7 +13,7 @@ use std::path::PathBuf;
 ///
 /// All configuration options are optional and will fall back to sensible defaults
 /// if not specified in the configuration file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     /// AWS-specific configuration options
     #[serde(default)]
@@ -29,7 +29,7 @@ pub struct Config {
 }
 
 /// AWS SDK configuration options.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AwsConfig {
     /// Default AWS region (e.g., "us-east-1")
     /// If not specified, will use AWS SDK's default resolution (env vars, profile, etc.)
@@ -82,25 +82,7 @@ fn default_theme() -> String {
     "dark".to_string()
 }
 
-// Implement Default trait for all config structs
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            aws: AwsConfig::default(),
-            behavior: BehaviorConfig::default(),
-            ui: UiConfig::default(),
-        }
-    }
-}
-
-impl Default for AwsConfig {
-    fn default() -> Self {
-        Self {
-            region: None,
-            profile: None,
-        }
-    }
-}
+// Default trait implementations removed - using derive(Default) instead
 
 impl Default for BehaviorConfig {
     fn default() -> Self {
@@ -153,10 +135,10 @@ impl Config {
 
         if config_path.exists() {
             let contents = fs::read_to_string(&config_path)
-                .with_context(|| format!("Failed to read config file: {:?}", config_path))?;
+                .with_context(|| format!("Failed to read config file: {config_path:?}"))?;
 
             let config: Config = toml::from_str(&contents)
-                .with_context(|| format!("Failed to parse config file: {:?}", config_path))?;
+                .with_context(|| format!("Failed to parse config file: {config_path:?}"))?;
 
             Ok(config)
         } else {
@@ -186,7 +168,7 @@ impl Config {
         // Create directory if it doesn't exist
         if !config_dir.exists() {
             fs::create_dir_all(&config_dir)
-                .with_context(|| format!("Failed to create config directory: {:?}", config_dir))?;
+                .with_context(|| format!("Failed to create config directory: {config_dir:?}"))?;
         }
 
         // Generate default config with comments
@@ -221,7 +203,41 @@ theme = "dark"
 "#;
 
         fs::write(&config_path, default_toml)
-            .with_context(|| format!("Failed to write config file: {:?}", config_path))?;
+            .with_context(|| format!("Failed to write config file: {config_path:?}"))?;
+
+        Ok(())
+    }
+
+    /// Saves the current configuration to the config file.
+    ///
+    /// Serializes the current config state to TOML and writes it to the file.
+    /// This is used to persist changes made during runtime (e.g., profile/region switches).
+    ///
+    /// # Returns
+    /// Returns `Ok(())` if successful, or an error if file operations fail
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - Directory creation fails
+    /// - TOML serialization fails
+    /// - File write operations fail
+    pub fn save(&self) -> Result<()> {
+        let config_dir = Self::config_dir()?;
+        let config_path = Self::config_file_path()?;
+
+        // Create directory if it doesn't exist
+        if !config_dir.exists() {
+            fs::create_dir_all(&config_dir)
+                .with_context(|| format!("Failed to create config directory: {config_dir:?}"))?;
+        }
+
+        // Serialize config to TOML
+        let toml_string = toml::to_string_pretty(self)
+            .with_context(|| "Failed to serialize config to TOML")?;
+
+        // Write to file
+        fs::write(&config_path, toml_string)
+            .with_context(|| format!("Failed to write config file: {config_path:?}"))?;
 
         Ok(())
     }

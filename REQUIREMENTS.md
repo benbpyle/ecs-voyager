@@ -17,42 +17,42 @@ Context:
 ### 1. Navigation & View Management
 
 #### 1.1 Cluster View
-- [ ] List all ECS clusters in the current AWS region
-- [ ] Display cluster names (extracted from ARNs)
-- [ ] Support keyboard navigation (↑/↓, j/k)
-- [ ] Highlight selected cluster
-- [ ] Press Enter to drill down into services
+- [x] List all ECS clusters in the current AWS region
+- [x] Display cluster names (extracted from ARNs)
+- [x] Support keyboard navigation (↑/↓, j/k)
+- [x] Highlight selected cluster
+- [x] Press Enter to drill down into services
 
 #### 1.2 Services View
-- [ ] List all services in the selected cluster
-- [ ] Display service information in table format:
+- [x] List all services in the selected cluster
+- [x] Display service information in table format:
   - Service name
   - Status (ACTIVE, DRAINING, etc.)
   - Desired count
   - Running count
   - Pending count
   - Launch type (EC2, FARGATE, EXTERNAL)
-- [ ] Navigate back to clusters with Esc/h
-- [ ] Press Enter to view tasks for selected service
+- [x] Navigate back to clusters with Esc/h
+- [x] Press Enter to view tasks for selected service
 
 #### 1.3 Tasks View
-- [ ] List all tasks for the selected service
-- [ ] Display task information in table format:
+- [x] List all tasks for the selected service
+- [x] Display task information in table format:
   - Task ID (short form)
   - Current status
   - Desired status
   - Container instance
   - CPU allocation
   - Memory allocation
-- [ ] Navigate back to services with Esc/h
-- [ ] Press Enter to view task details
+- [x] Navigate back to services with Esc/h
+- [x] Press Enter to view task details
 
 #### 1.4 Details View
-- [ ] Display formatted details for selected resource
-- [ ] Show service details (ARN, task definition, load balancers, etc.)
-- [ ] Show task details (containers, network info, etc.)
-- [ ] Navigate back with Esc/h
-- [ ] Support scrolling for long content
+- [x] Display formatted details for selected resource
+- [x] Show service details (ARN, task definition, load balancers, etc.)
+- [x] Show task details (containers, network info, etc.)
+- [x] Navigate back with Esc/h
+- [x] Support scrolling for long content
 
 ### 2. Data Management
 
@@ -66,15 +66,15 @@ Context:
 
 #### 2.2 Auto-refresh
 - [x] Implement 30-second auto-refresh for current view
-- [ ] Add configurable refresh interval
-- [ ] Show refresh indicator/timestamp
-- [ ] Pause auto-refresh on user interaction
+- [x] Add configurable refresh interval
+- [x] Show refresh indicator/timestamp
+- [x] Pause auto-refresh on user interaction
 
 #### 2.3 Manual Refresh
 - [x] Press 'r' to manually refresh current view
 - [x] Update status message on refresh
-- [ ] Show loading indicator during refresh
-- [ ] Handle refresh errors gracefully
+- [x] Show loading indicator during refresh
+- [x] Handle refresh errors gracefully
 
 ### 3. Management Operations
 

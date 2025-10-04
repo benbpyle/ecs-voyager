@@ -14,7 +14,7 @@ use ratatui::{
 use std::time::SystemTime;
 use chrono::{DateTime, Local};
 
-use crate::app::{App, AppState};
+use crate::app::{App, AppState, ModalState};
 
 /// Main rendering function that draws the entire UI.
 ///
@@ -30,7 +30,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         .constraints([
             Constraint::Length(3),  // Header
             Constraint::Min(0),      // Content
-            Constraint::Length(3),  // Footer
+            Constraint::Length(5),  // Footer (multi-line)
         ])
         .split(f.area());
 
@@ -55,7 +55,14 @@ pub fn draw(f: &mut Frame, app: &App) {
         draw_search_input(f, app);
     }
 
-    // Draw loading indicator overlay if loading
+    // Draw modals
+    match app.modal_state {
+        ModalState::ProfileSelector => draw_profile_selector(f, app),
+        ModalState::RegionSelector => draw_region_selector(f, app),
+        ModalState::None => {}
+    }
+
+    // Draw loading indicator overlay if loading (rendered last so it's on top)
     if app.loading {
         draw_loading_overlay(f, app);
     }
@@ -75,13 +82,13 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
         AppState::Clusters => "ECS Voyager - Clusters",
         AppState::Services => {
             if let Some(cluster) = &app.selected_cluster {
-                return draw_custom_header(f, area, &format!("ECS Voyager - Services ({})", cluster));
+                return draw_custom_header(f, area, &format!("ECS Voyager - Services ({cluster})"));
             }
             "ECS Voyager - Services"
         }
         AppState::Tasks => {
             if let (Some(cluster), Some(service)) = (&app.selected_cluster, &app.selected_service) {
-                return draw_custom_header(f, area, &format!("ECS Voyager - Tasks ({}/{})", cluster, service));
+                return draw_custom_header(f, area, &format!("ECS Voyager - Tasks ({cluster}/{service})"));
             }
             "ECS Voyager - Tasks"
         }
@@ -114,8 +121,10 @@ fn draw_custom_header(f: &mut Frame, area: Rect, title: &str) {
 
 /// Renders the footer section with keybindings and status information.
 ///
-/// Shows available keyboard shortcuts and the current status message. When loading,
-/// displays a spinner animation. If search is active, shows the search query.
+/// Shows a multi-line status bar with:
+/// - Line 1: Keybindings organized by category
+/// - Line 2: AWS context (region, profile) and status
+/// - Line 3: Last refresh time and item counts
 ///
 /// # Arguments
 /// * `f` - The ratatui Frame to render into
@@ -131,41 +140,96 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
             ])
         ]
     } else {
-        let status_color = if app.loading { Color::Yellow } else { Color::Green };
+        // Line 1: Keybindings
+        let line1 = Line::from(vec![
+            Span::styled("[", Style::default().fg(Color::DarkGray)),
+            Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(":quit ", Style::default().fg(Color::Gray)),
+            Span::styled("?", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(":help ", Style::default().fg(Color::Gray)),
+            Span::styled("r", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(":refresh ", Style::default().fg(Color::Gray)),
+            Span::styled("P", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(":profile ", Style::default().fg(Color::Gray)),
+            Span::styled("R", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(":region", Style::default().fg(Color::Gray)),
+            Span::styled("] ", Style::default().fg(Color::DarkGray)),
+            Span::styled("• ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[", Style::default().fg(Color::DarkGray)),
+            Span::styled("1-3", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(":views ", Style::default().fg(Color::Gray)),
+            Span::styled("↑↓/jk", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(":nav ", Style::default().fg(Color::Gray)),
+            Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(":select", Style::default().fg(Color::Gray)),
+            Span::styled("]", Style::default().fg(Color::DarkGray)),
+        ]);
+
+        // Line 2: AWS context and status
+        let connection_indicator = if app.loading { "○" } else { "●" };
+        let connection_color = if app.loading { Color::Yellow } else { Color::Green };
         let status_text = if app.loading {
             format!("{} {}", get_spinner(), app.status_message)
         } else {
             app.status_message.clone()
         };
 
-        vec![
-            Line::from(vec![
-                Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(":quit ", Style::default().fg(Color::Gray)),
-                Span::styled("?", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(":help ", Style::default().fg(Color::Gray)),
-                Span::styled("r", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(":refresh ", Style::default().fg(Color::Gray)),
-                Span::styled("1-3", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(":switch view ", Style::default().fg(Color::Gray)),
-                Span::styled("↑↓/jk", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(":navigate ", Style::default().fg(Color::Gray)),
-                Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(":select ", Style::default().fg(Color::Gray)),
-            ]),
-            Line::from(vec![
-                Span::styled("Status: ", Style::default().fg(Color::Gray)),
-                Span::styled(status_text, Style::default().fg(status_color)),
-                if app.search_mode || !app.search_query.is_empty() {
-                    Span::styled(
-                        format!(" | Search: {}", if app.search_query.is_empty() { "_" } else { &app.search_query }),
-                        Style::default().fg(Color::Yellow)
-                    )
-                } else {
-                    Span::raw("")
-                },
-            ])
-        ]
+        let item_count = match app.state {
+            AppState::Clusters => format!("{} clusters", app.clusters.len()),
+            AppState::Services => format!("{} services", app.services.len()),
+            AppState::Tasks => format!("{} tasks", app.tasks.len()),
+            AppState::Logs => format!("{} logs", app.logs.len()),
+            AppState::Details => "details".to_string(),
+        };
+
+        let line2 = Line::from(vec![
+            Span::styled("Region: ", Style::default().fg(Color::Gray)),
+            Span::styled(&app.current_region, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Profile: ", Style::default().fg(Color::Gray)),
+            Span::styled(&app.current_profile, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled(connection_indicator, Style::default().fg(connection_color)),
+            Span::styled(" ", Style::default()),
+            Span::styled(status_text, Style::default().fg(connection_color)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled(item_count, Style::default().fg(Color::White)),
+        ]);
+
+        // Line 3: Refresh info
+        let elapsed = app.last_refresh.elapsed().as_secs();
+        let refresh_text = if elapsed < 60 {
+            format!("{elapsed}s ago")
+        } else {
+            let mins = elapsed / 60;
+            let secs = elapsed % 60;
+            format!("{mins}m {secs}s ago")
+        };
+
+        let refresh_interval = app.config.behavior.refresh_interval;
+        let auto_refresh_status = if app.config.behavior.auto_refresh {
+            format!("ON ({refresh_interval}s)")
+        } else {
+            "OFF".to_string()
+        };
+
+        let line3 = Line::from(vec![
+            Span::styled("Last refresh: ", Style::default().fg(Color::Gray)),
+            Span::styled(refresh_text, Style::default().fg(Color::White)),
+            Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Auto-refresh: ", Style::default().fg(Color::Gray)),
+            Span::styled(auto_refresh_status, Style::default().fg(Color::White)),
+            if app.search_mode || !app.search_query.is_empty() {
+                Span::styled(
+                    format!(" | Search: {}", if app.search_query.is_empty() { "_" } else { &app.search_query }),
+                    Style::default().fg(Color::Yellow)
+                )
+            } else {
+                Span::raw("")
+            },
+        ]);
+
+        vec![line1, line2, line3]
     };
 
     let footer = Paragraph::new(footer_text)
@@ -360,11 +424,12 @@ fn draw_tasks(f: &mut Frame, area: Rect, app: &App) {
 ///
 /// Displays detailed information about a selected service or task in a scrollable
 /// text view. The content is formatted as multi-line text with word wrapping.
+/// Supports scrolling with up/down arrow keys or j/k for long content.
 ///
 /// # Arguments
 /// * `f` - The ratatui Frame to render into
 /// * `area` - The rectangular area allocated for the details view
-/// * `app` - The application state containing details text
+/// * `app` - The application state containing details text and scroll position
 fn draw_details(f: &mut Frame, area: Rect, app: &App) {
     let default_text = "No details available".to_string();
     let content = app.details.as_ref().unwrap_or(&default_text);
@@ -373,10 +438,11 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App) {
         .style(Style::default().fg(Color::White))
         .block(
             Block::default()
-                .title("Details (Press Esc or h to go back)")
+                .title("Details (↑↓:scroll | Esc/h:back)")
                 .borders(Borders::ALL),
         )
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((app.details_scroll as u16, 0));
 
     f.render_widget(paragraph, area);
 }
@@ -427,13 +493,13 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
             // Convert timestamp (milliseconds) to datetime
             let datetime = DateTime::from_timestamp_millis(log.timestamp)
                 .map(|dt| dt.with_timezone(&Local))
-                .unwrap_or_else(|| Local::now());
+                .unwrap_or_else(Local::now);
 
             let timestamp_str = datetime.format("%Y-%m-%d %H:%M:%S%.3f").to_string();
 
             Line::from(vec![
                 Span::styled(
-                    format!("[{}] ", timestamp_str),
+                    format!("[{timestamp_str}] "),
                     Style::default().fg(Color::DarkGray),
                 ),
                 Span::styled(
@@ -449,15 +515,16 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let scroll_indicator = if total_logs > available_height {
-        format!(" [{}-{}/{}]", start_idx + 1, end_idx, total_logs)
+        let start = start_idx + 1;
+        format!(" [{start}-{end_idx}/{total_logs}]")
     } else {
-        format!(" [{}]", total_logs)
+        format!(" [{total_logs}]")
     };
 
     let title = if app.auto_tail {
-        format!("Logs{} (AUTO-TAIL | t:toggle | Esc/h:back | r:refresh)", scroll_indicator)
+        format!("Logs{scroll_indicator} (AUTO-TAIL | t:toggle | Esc/h:back | r:refresh)")
     } else {
-        format!("Logs{} (↑↓:scroll | t:toggle tail | Esc/h:back | r:refresh)", scroll_indicator)
+        format!("Logs{scroll_indicator} (↑↓:scroll | t:toggle tail | Esc/h:back | r:refresh)")
     };
 
     let logs_widget = Paragraph::new(log_lines)
@@ -527,6 +594,14 @@ fn draw_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  r           ", Style::default().fg(Color::Yellow)),
             Span::raw("Refresh current view"),
+        ]),
+        Line::from(vec![
+            Span::styled("  P           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Switch AWS profile"),
+        ]),
+        Line::from(vec![
+            Span::styled("  R           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Switch AWS region"),
         ]),
         Line::from(vec![
             Span::styled("  d           ", Style::default().fg(Color::Yellow)),
@@ -601,7 +676,7 @@ fn draw_loading_overlay(f: &mut Frame, app: &App) {
         Line::from(""),
         Line::from(vec![
             Span::styled(
-                format!("  {}  ", spinner),
+                format!("  {spinner}  "),
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -689,4 +764,134 @@ fn get_spinner() -> &'static str {
     let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let index = ((now / 80) % frames.len() as u128) as usize;
     frames[index]
+}
+
+/// Renders the profile selector modal.
+///
+/// Displays a centered modal dialog with a list of available AWS profiles.
+/// The currently selected profile is highlighted. Users can navigate with
+/// arrow keys and select with Enter.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `app` - The application state containing available profiles
+fn draw_profile_selector(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let width = 60.min(area.width.saturating_sub(4));
+    let height = (app.available_profiles.len() + 4).min(20) as u16;
+
+    let modal_area = Rect {
+        x: area.width.saturating_sub(width) / 2,
+        y: area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+
+    // Clear the area behind the modal
+    f.render_widget(Clear, modal_area);
+
+    // Create list items
+    let items: Vec<ListItem> = app.available_profiles
+        .iter()
+        .enumerate()
+        .map(|(i, profile)| {
+            let mut style = if i == app.modal_selected_index {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            // Mark current profile with indicator
+            let display_text = if profile == &app.current_profile {
+                format!("● {profile}")
+            } else {
+                format!("  {profile}")
+            };
+
+            if profile == &app.current_profile && i != app.modal_selected_index {
+                style = style.fg(Color::Green);
+            }
+
+            ListItem::new(display_text).style(style)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title("Select AWS Profile (↑↓:navigate | Enter:select | Esc:cancel)")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .style(Style::default().bg(Color::Black)),
+        );
+
+    f.render_widget(list, modal_area);
+}
+
+/// Renders the region selector modal.
+///
+/// Displays a centered modal dialog with a list of common AWS regions.
+/// The currently selected region is highlighted. Users can navigate with
+/// arrow keys and select with Enter.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `app` - The application state containing available regions
+fn draw_region_selector(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let width = 60.min(area.width.saturating_sub(4));
+    let height = (app.available_regions.len() + 4).min(20) as u16;
+
+    let modal_area = Rect {
+        x: area.width.saturating_sub(width) / 2,
+        y: area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+
+    // Clear the area behind the modal
+    f.render_widget(Clear, modal_area);
+
+    // Create list items
+    let items: Vec<ListItem> = app.available_regions
+        .iter()
+        .enumerate()
+        .map(|(i, region)| {
+            let mut style = if i == app.modal_selected_index {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            // Mark current region with indicator
+            let display_text = if region == &app.current_region {
+                format!("● {region}")
+            } else {
+                format!("  {region}")
+            };
+
+            if region == &app.current_region && i != app.modal_selected_index {
+                style = style.fg(Color::Cyan);
+            }
+
+            ListItem::new(display_text).style(style)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title("Select AWS Region (↑↓:navigate | Enter:select | Esc:cancel)")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan))
+                .style(Style::default().bg(Color::Black)),
+        );
+
+    f.render_widget(list, modal_area);
 }

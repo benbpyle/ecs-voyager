@@ -10,7 +10,7 @@ mod aws;
 mod config;
 
 use anyhow::Result;
-use app::{App, AppState};
+use app::{App, AppState, ModalState};
 use config::Config;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     terminal.show_cursor()?;
 
     if let Err(err) = res {
-        eprintln!("Error: {:?}", err);
+        eprintln!("Error: {err:?}");
     }
 
     Ok(())
@@ -107,8 +107,18 @@ async fn run_app<B: ratatui::backend::Backend>(
         if event::poll(std::time::Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    // Handle search mode input separately
-                    if app.search_mode {
+                    // Handle modal input first
+                    if app.modal_state != ModalState::None {
+                        match key.code {
+                            KeyCode::Up | KeyCode::Char('k') => app.modal_previous(),
+                            KeyCode::Down | KeyCode::Char('j') => app.modal_next(),
+                            KeyCode::Enter => app.modal_select().await?,
+                            KeyCode::Esc => app.close_modal(),
+                            _ => {}
+                        }
+                    }
+                    // Handle search mode input
+                    else if app.search_mode {
                         match key.code {
                             KeyCode::Char(c) => app.update_search(c),
                             KeyCode::Backspace => app.delete_search_char(),
@@ -116,9 +126,13 @@ async fn run_app<B: ratatui::backend::Backend>(
                             KeyCode::Esc => app.clear_search(),
                             _ => {}
                         }
-                    } else {
+                    }
+                    // Handle normal mode input
+                    else {
                         match key.code {
                             KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Char('P') => app.show_profile_selector(),
+                            KeyCode::Char('R') => app.show_region_selector(),
                             KeyCode::Char('/') => {
                                 // Only enable search in list views
                                 match app.state {

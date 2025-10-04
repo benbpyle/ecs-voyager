@@ -27,6 +27,17 @@ pub enum AppState {
     Logs,
 }
 
+/// Represents modal dialogs that can be shown over the main view.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModalState {
+    /// No modal is shown
+    None,
+    /// Profile selector modal
+    ProfileSelector,
+    /// Region selector modal
+    RegionSelector,
+}
+
 /// Main application state container.
 ///
 /// Holds all UI state, data from AWS, and manages navigation between views.
@@ -46,6 +57,20 @@ pub struct App {
     /// Application configuration
     pub config: Config,
 
+    // AWS Context
+    /// Current AWS profile name
+    pub current_profile: String,
+    /// Current AWS region
+    pub current_region: String,
+    /// Available AWS profiles from ~/.aws/credentials
+    pub available_profiles: Vec<String>,
+    /// Common AWS regions to choose from
+    pub available_regions: Vec<String>,
+    /// Current modal state
+    pub modal_state: ModalState,
+    /// Selected index in modal lists
+    pub modal_selected_index: usize,
+
     // Data
     /// List of ECS cluster names
     pub clusters: Vec<String>,
@@ -61,6 +86,8 @@ pub struct App {
     pub selected_task: Option<TaskInfo>,
     /// Detailed description text for resources
     pub details: Option<String>,
+    /// Current scroll position in details view (line number)
+    pub details_scroll: usize,
     /// Log entries for selected task
     pub logs: Vec<LogEntry>,
     /// Current scroll position in logs
@@ -81,6 +108,10 @@ pub struct App {
     pub loading: bool,
     /// Timestamp of last data refresh
     pub last_refresh: Instant,
+    /// Whether auto-refresh is paused due to user interaction
+    pub auto_refresh_paused: bool,
+    /// Timestamp when auto-refresh was paused
+    pub auto_refresh_pause_time: Option<Instant>,
 }
 
 /// Information about an ECS service.
@@ -169,6 +200,32 @@ impl App {
             _ => AppState::Clusters,
         };
 
+        // Get current profile and region from config or defaults
+        let current_profile = config.aws.profile.clone()
+            .unwrap_or_else(|| "default".to_string());
+        let current_region = config.aws.region.clone()
+            .unwrap_or_else(|| "us-east-1".to_string());
+
+        // Load available profiles from ~/.aws/credentials
+        let available_profiles = list_aws_profiles().unwrap_or_else(|_| vec!["default".to_string()]);
+
+        // Define common AWS regions
+        let available_regions = vec![
+            "us-east-1".to_string(),
+            "us-east-2".to_string(),
+            "us-west-1".to_string(),
+            "us-west-2".to_string(),
+            "eu-west-1".to_string(),
+            "eu-west-2".to_string(),
+            "eu-central-1".to_string(),
+            "ap-southeast-1".to_string(),
+            "ap-southeast-2".to_string(),
+            "ap-northeast-1".to_string(),
+            "ap-south-1".to_string(),
+            "sa-east-1".to_string(),
+            "ca-central-1".to_string(),
+        ];
+
         let mut app = Self {
             state: initial_state,
             previous_state: None,
@@ -176,6 +233,12 @@ impl App {
             selected_index: 0,
             ecs_client,
             config,
+            current_profile,
+            current_region,
+            available_profiles,
+            available_regions,
+            modal_state: ModalState::None,
+            modal_selected_index: 0,
             clusters: Vec::new(),
             services: Vec::new(),
             tasks: Vec::new(),
@@ -183,6 +246,7 @@ impl App {
             selected_service: None,
             selected_task: None,
             details: None,
+            details_scroll: 0,
             logs: Vec::new(),
             log_scroll: 0,
             auto_tail: true,
@@ -191,6 +255,8 @@ impl App {
             status_message: "Loading clusters...".to_string(),
             loading: false,
             last_refresh: Instant::now(),
+            auto_refresh_paused: false,
+            auto_refresh_pause_time: None,
         };
 
         app.refresh().await?;
@@ -208,14 +274,21 @@ impl App {
     }
 
     pub fn next(&mut self) {
+        // Pause auto-refresh on user navigation
+        self.pause_auto_refresh();
+
         let len = match self.state {
             AppState::Clusters => self.clusters.len(),
             AppState::Services => self.services.len(),
             AppState::Tasks => self.tasks.len(),
-            AppState::Details => 0,
+            AppState::Details => {
+                // Scroll down in details view
+                self.details_scroll = self.details_scroll.saturating_add(1);
+                return;
+            }
             AppState::Logs => {
                 // Scroll down in logs
-                if self.logs.len() > 0 {
+                if !self.logs.is_empty() {
                     self.log_scroll = self.log_scroll.saturating_add(1);
                     self.auto_tail = false;
                 }
@@ -229,11 +302,18 @@ impl App {
     }
 
     pub fn previous(&mut self) {
+        // Pause auto-refresh on user navigation
+        self.pause_auto_refresh();
+
         let len = match self.state {
             AppState::Clusters => self.clusters.len(),
             AppState::Services => self.services.len(),
             AppState::Tasks => self.tasks.len(),
-            AppState::Details => 0,
+            AppState::Details => {
+                // Scroll up in details view
+                self.details_scroll = self.details_scroll.saturating_sub(1);
+                return;
+            }
             AppState::Logs => {
                 // Scroll up in logs
                 self.log_scroll = self.log_scroll.saturating_sub(1);
@@ -257,7 +337,7 @@ impl App {
                 if let Some(cluster) = self.clusters.get(self.selected_index) {
                     self.selected_cluster = Some(cluster.clone());
                     self.loading = true;
-                    self.status_message = format!("Loading services for cluster: {}", cluster);
+                    self.status_message = format!("Loading services for cluster: {cluster}");
                     self.services = self.ecs_client.list_services(cluster).await?;
                     self.loading = false;
                     self.set_view(AppState::Services);
@@ -319,28 +399,59 @@ impl App {
         }
     }
 
+    /// Refreshes data for the current view.
+    ///
+    /// Handles AWS API errors gracefully by displaying error messages to the user
+    /// instead of crashing the application.
+    ///
+    /// # Returns
+    /// Always returns `Ok(())` - errors are handled internally and displayed as status messages
     pub async fn refresh(&mut self) -> Result<()> {
         self.loading = true;
         self.last_refresh = Instant::now();
 
+        // Resume auto-refresh on refresh attempt (clears any pause)
+        self.resume_auto_refresh();
+
         match self.state {
             AppState::Clusters => {
                 self.status_message = "Refreshing clusters...".to_string();
-                self.clusters = self.ecs_client.list_clusters().await?;
-                self.status_message = format!("Loaded {} clusters", self.clusters.len());
+                match self.ecs_client.list_clusters().await {
+                    Ok(clusters) => {
+                        self.clusters = clusters;
+                        self.status_message = format!("Loaded {} clusters", self.clusters.len());
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Error loading clusters: {e}");
+                    }
+                }
             }
             AppState::Services => {
                 if let Some(cluster) = &self.selected_cluster {
                     self.status_message = "Refreshing services...".to_string();
-                    self.services = self.ecs_client.list_services(cluster).await?;
-                    self.status_message = format!("Loaded {} services", self.services.len());
+                    match self.ecs_client.list_services(cluster).await {
+                        Ok(services) => {
+                            self.services = services;
+                            self.status_message = format!("Loaded {} services", self.services.len());
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Error loading services: {e}");
+                        }
+                    }
                 }
             }
             AppState::Tasks => {
                 if let (Some(cluster), Some(service)) = (&self.selected_cluster, &self.selected_service) {
                     self.status_message = "Refreshing tasks...".to_string();
-                    self.tasks = self.ecs_client.list_tasks(cluster, service).await?;
-                    self.status_message = format!("Loaded {} tasks", self.tasks.len());
+                    match self.ecs_client.list_tasks(cluster, service).await {
+                        Ok(tasks) => {
+                            self.tasks = tasks;
+                            self.status_message = format!("Loaded {} tasks", self.tasks.len());
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Error loading tasks: {e}");
+                        }
+                    }
                 }
             }
             AppState::Details => {}
@@ -348,16 +459,25 @@ impl App {
                 // Refresh logs if we have a selected task
                 if let (Some(cluster), Some(task)) = (&self.selected_cluster, &self.selected_task) {
                     self.status_message = "Refreshing logs...".to_string();
-                    self.logs = self.ecs_client.get_task_logs(cluster, &task.task_arn).await?;
-                    if self.auto_tail && !self.logs.is_empty() {
-                        self.log_scroll = self.logs.len().saturating_sub(1);
+                    match self.ecs_client.get_task_logs(cluster, &task.task_arn).await {
+                        Ok(logs) => {
+                            self.logs = logs;
+                            if self.auto_tail && !self.logs.is_empty() {
+                                self.log_scroll = self.logs.len().saturating_sub(1);
+                            }
+                            self.status_message = format!("Loaded {} log entries", self.logs.len());
+                        }
+                        Err(e) => {
+                            self.status_message = format!("Error loading logs: {e}");
+                        }
                     }
-                    self.status_message = format!("Loaded {} log entries", self.logs.len());
                 }
             }
         }
 
         self.loading = false;
+
+        // Always return Ok - errors are shown to user in status message
         Ok(())
     }
 
@@ -423,10 +543,44 @@ impl App {
         Ok(())
     }
 
+    /// Pauses auto-refresh temporarily due to user interaction.
+    ///
+    /// Auto-refresh will automatically resume after 10 seconds.
+    pub fn pause_auto_refresh(&mut self) {
+        self.auto_refresh_paused = true;
+        self.auto_refresh_pause_time = Some(Instant::now());
+    }
+
+    /// Resumes auto-refresh if it was paused.
+    pub fn resume_auto_refresh(&mut self) {
+        self.auto_refresh_paused = false;
+        self.auto_refresh_pause_time = None;
+    }
+
+    /// Determines if auto-refresh should occur.
+    ///
+    /// Auto-refresh is skipped if:
+    /// - Disabled in config
+    /// - Paused due to user interaction (and pause hasn't expired)
+    ///
+    /// Auto-refresh pauses automatically resume after 10 seconds.
+    ///
+    /// # Returns
+    /// `true` if refresh should occur, `false` otherwise
     pub fn should_refresh(&self) -> bool {
         // Skip auto-refresh if disabled in config
         if !self.config.behavior.auto_refresh {
             return false;
+        }
+
+        // Skip auto-refresh if paused and pause hasn't expired
+        if self.auto_refresh_paused {
+            if let Some(pause_time) = self.auto_refresh_pause_time {
+                // Resume auto-refresh after 10 seconds of pause
+                if pause_time.elapsed() < Duration::from_secs(10) {
+                    return false;
+                }
+            }
         }
 
         // Auto-refresh logs more frequently when in Logs view
@@ -545,6 +699,183 @@ impl App {
                 .collect()
         }
     }
+
+    // Modal management methods
+    pub fn show_profile_selector(&mut self) {
+        self.modal_state = ModalState::ProfileSelector;
+        self.modal_selected_index = 0;
+        // Try to find current profile in the list
+        if let Some(idx) = self.available_profiles.iter().position(|p| p == &self.current_profile) {
+            self.modal_selected_index = idx;
+        }
+    }
+
+    pub fn show_region_selector(&mut self) {
+        self.modal_state = ModalState::RegionSelector;
+        self.modal_selected_index = 0;
+        // Try to find current region in the list
+        if let Some(idx) = self.available_regions.iter().position(|r| r == &self.current_region) {
+            self.modal_selected_index = idx;
+        }
+    }
+
+    pub fn close_modal(&mut self) {
+        self.modal_state = ModalState::None;
+        self.modal_selected_index = 0;
+    }
+
+    pub fn modal_next(&mut self) {
+        let len = match self.modal_state {
+            ModalState::ProfileSelector => self.available_profiles.len(),
+            ModalState::RegionSelector => self.available_regions.len(),
+            ModalState::None => 0,
+        };
+        if len > 0 {
+            self.modal_selected_index = (self.modal_selected_index + 1) % len;
+        }
+    }
+
+    pub fn modal_previous(&mut self) {
+        let len = match self.modal_state {
+            ModalState::ProfileSelector => self.available_profiles.len(),
+            ModalState::RegionSelector => self.available_regions.len(),
+            ModalState::None => 0,
+        };
+        if len > 0 {
+            self.modal_selected_index = if self.modal_selected_index == 0 {
+                len - 1
+            } else {
+                self.modal_selected_index - 1
+            };
+        }
+    }
+
+    pub async fn modal_select(&mut self) -> Result<()> {
+        match self.modal_state {
+            ModalState::ProfileSelector => {
+                if let Some(profile) = self.available_profiles.get(self.modal_selected_index) {
+                    self.switch_profile(profile.clone()).await?;
+                }
+            }
+            ModalState::RegionSelector => {
+                if let Some(region) = self.available_regions.get(self.modal_selected_index) {
+                    self.switch_region(region.clone()).await?;
+                }
+            }
+            ModalState::None => {}
+        }
+        Ok(())
+    }
+
+    // Profile and region switching
+    pub async fn switch_profile(&mut self, profile: String) -> Result<()> {
+        self.loading = true;
+        self.status_message = format!("Switching to profile: {profile}");
+        self.close_modal();
+
+        // Update config and save
+        self.config.aws.profile = Some(profile.clone());
+        self.config.save()?;
+
+        // Reinitialize AWS client
+        self.ecs_client = EcsClient::new(
+            Some(self.current_region.clone()),
+            Some(profile.clone()),
+        ).await?;
+
+        self.current_profile = profile;
+
+        // Clear current data
+        self.clusters.clear();
+        self.services.clear();
+        self.tasks.clear();
+        self.selected_cluster = None;
+        self.selected_service = None;
+        self.selected_task = None;
+        self.details = None;
+        self.logs.clear();
+
+        // Reset to clusters view
+        self.state = AppState::Clusters;
+        self.selected_index = 0;
+
+        // Refresh data
+        self.refresh().await?;
+        self.loading = false;
+        self.status_message = format!("Switched to profile: {}", self.current_profile);
+
+        Ok(())
+    }
+
+    pub async fn switch_region(&mut self, region: String) -> Result<()> {
+        self.loading = true;
+        self.status_message = format!("Switching to region: {region}");
+        self.close_modal();
+
+        // Update config and save
+        self.config.aws.region = Some(region.clone());
+        self.config.save()?;
+
+        // Reinitialize AWS client
+        self.ecs_client = EcsClient::new(
+            Some(region.clone()),
+            Some(self.current_profile.clone()),
+        ).await?;
+
+        self.current_region = region;
+
+        // Clear current data
+        self.clusters.clear();
+        self.services.clear();
+        self.tasks.clear();
+        self.selected_cluster = None;
+        self.selected_service = None;
+        self.selected_task = None;
+        self.details = None;
+        self.logs.clear();
+
+        // Reset to clusters view
+        self.state = AppState::Clusters;
+        self.selected_index = 0;
+
+        // Refresh data
+        self.refresh().await?;
+        self.loading = false;
+        self.status_message = format!("Switched to region: {}", self.current_region);
+
+        Ok(())
+    }
+}
+
+/// Reads available AWS profiles from ~/.aws/credentials
+fn list_aws_profiles() -> Result<Vec<String>> {
+    use std::fs;
+
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("Failed to determine home directory"))?;
+
+    let credentials_path = home_dir.join(".aws").join("credentials");
+
+    if !credentials_path.exists() {
+        return Ok(vec!["default".to_string()]);
+    }
+
+    let contents = fs::read_to_string(&credentials_path)?;
+    let mut profiles = Vec::new();
+
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let profile_name = trimmed[1..trimmed.len()-1].to_string();
+            profiles.push(profile_name);
+        }
+    }
+
+    if profiles.is_empty() {
+        profiles.push("default".to_string());
+    }
+
+    Ok(profiles)
 }
 
 #[cfg(test)]
@@ -585,6 +916,12 @@ mod tests {
             selected_index: 0,
             ecs_client: unsafe { fake_client.assume_init() },
             config: create_test_config(),
+            current_profile: "default".to_string(),
+            current_region: "us-east-1".to_string(),
+            available_profiles: vec!["default".to_string()],
+            available_regions: vec!["us-east-1".to_string()],
+            modal_state: ModalState::None,
+            modal_selected_index: 0,
             clusters: vec![
                 "cluster-prod".to_string(),
                 "cluster-dev".to_string(),
@@ -649,6 +986,7 @@ mod tests {
             selected_service: None,
             selected_task: None,
             details: None,
+            details_scroll: 0,
             logs: vec![],
             log_scroll: 0,
             auto_tail: true,
@@ -657,6 +995,8 @@ mod tests {
             status_message: "Ready".to_string(),
             loading: false,
             last_refresh: Instant::now(),
+            auto_refresh_paused: false,
+            auto_refresh_pause_time: None,
         })
     }
 
