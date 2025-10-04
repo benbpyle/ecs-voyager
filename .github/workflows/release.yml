@@ -125,9 +125,3 @@ Auto-updated by release workflow:
 
           # Push to master
           git push origin HEAD:master
-
-      - name: Create PR to homebrew tap (optional)
-        run: |
-          echo "Formula updated in main repository"
-          echo "To publish to a tap, create a separate homebrew-ecs-voyager repository"
-          echo "and configure the tap update workflow"
