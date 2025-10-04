@@ -248,10 +248,8 @@ impl App {
     /// - The initial cluster list API call fails
     pub async fn new(config: Config) -> Result<Self> {
         // Initialize ECS client with config settings
-        let ecs_client = EcsClient::new(
-            config.aws.region.clone(),
-            config.aws.profile.clone(),
-        ).await?;
+        let ecs_client =
+            EcsClient::new(config.aws.region.clone(), config.aws.profile.clone()).await?;
 
         // Determine initial state based on config
         let initial_state = match config.behavior.default_view.as_str() {
@@ -261,13 +259,20 @@ impl App {
         };
 
         // Get current profile and region from config or defaults
-        let current_profile = config.aws.profile.clone()
+        let current_profile = config
+            .aws
+            .profile
+            .clone()
             .unwrap_or_else(|| "default".to_string());
-        let current_region = config.aws.region.clone()
+        let current_region = config
+            .aws
+            .region
+            .clone()
             .unwrap_or_else(|| "us-east-1".to_string());
 
         // Load available profiles from ~/.aws/credentials
-        let available_profiles = list_aws_profiles().unwrap_or_else(|_| vec!["default".to_string()]);
+        let available_profiles =
+            list_aws_profiles().unwrap_or_else(|_| vec!["default".to_string()]);
 
         // Define common AWS regions
         let available_regions = vec![
@@ -421,7 +426,8 @@ impl App {
                     self.selected_service = Some(service.name.clone());
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
-                        self.status_message = format!("Loading tasks for service: {}", service.name);
+                        self.status_message =
+                            format!("Loading tasks for service: {}", service.name);
                         self.tasks = self.ecs_client.list_tasks(cluster, &service.name).await?;
                         self.loading = false;
                         self.set_view(AppState::Tasks);
@@ -435,7 +441,11 @@ impl App {
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
                         self.status_message = "Loading task details...".to_string();
-                        self.details = Some(self.ecs_client.describe_task(cluster, &task.task_arn).await?);
+                        self.details = Some(
+                            self.ecs_client
+                                .describe_task(cluster, &task.task_arn)
+                                .await?,
+                        );
                         self.loading = false;
                         self.set_view(AppState::Details);
                         self.status_message = "Task details loaded".to_string();
@@ -509,7 +519,8 @@ impl App {
                     match self.ecs_client.list_services(cluster).await {
                         Ok(services) => {
                             self.services = services;
-                            self.status_message = format!("Loaded {} services", self.services.len());
+                            self.status_message =
+                                format!("Loaded {} services", self.services.len());
                         }
                         Err(e) => {
                             self.status_message = format!("Error loading services: {e}");
@@ -518,7 +529,9 @@ impl App {
                 }
             }
             AppState::Tasks => {
-                if let (Some(cluster), Some(service)) = (&self.selected_cluster, &self.selected_service) {
+                if let (Some(cluster), Some(service)) =
+                    (&self.selected_cluster, &self.selected_service)
+                {
                     self.status_message = "Refreshing tasks...".to_string();
                     match self.ecs_client.list_tasks(cluster, service).await {
                         Ok(tasks) => {
@@ -552,10 +565,16 @@ impl App {
             }
             AppState::Metrics => {
                 // Refresh metrics if we have a selected service
-                if let (Some(cluster), Some(service)) = (&self.selected_cluster, &self.selected_service) {
+                if let (Some(cluster), Some(service)) =
+                    (&self.selected_cluster, &self.selected_service)
+                {
                     self.status_message = "Refreshing metrics...".to_string();
                     let time_range = self.config.metrics.time_range_minutes;
-                    match self.ecs_client.get_service_metrics(cluster, service, time_range).await {
+                    match self
+                        .ecs_client
+                        .get_service_metrics(cluster, service, time_range)
+                        .await
+                    {
                         Ok(metrics) => {
                             self.metrics = Some(metrics);
                             self.status_message = "Metrics refreshed".to_string();
@@ -581,7 +600,11 @@ impl App {
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
                         self.status_message = format!("Describing service: {}", service.name);
-                        self.details = Some(self.ecs_client.describe_service(cluster, &service.name).await?);
+                        self.details = Some(
+                            self.ecs_client
+                                .describe_service(cluster, &service.name)
+                                .await?,
+                        );
                         self.loading = false;
                         self.set_view(AppState::Details);
                         self.status_message = "Service details loaded".to_string();
@@ -593,7 +616,11 @@ impl App {
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
                         self.status_message = "Describing task...".to_string();
-                        self.details = Some(self.ecs_client.describe_task(cluster, &task.task_arn).await?);
+                        self.details = Some(
+                            self.ecs_client
+                                .describe_task(cluster, &task.task_arn)
+                                .await?,
+                        );
                         self.loading = false;
                         self.set_view(AppState::Details);
                         self.status_message = "Task details loaded".to_string();
@@ -612,7 +639,9 @@ impl App {
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
                         self.status_message = format!("Restarting service: {}", service.name);
-                        self.ecs_client.restart_service(cluster, &service.name).await?;
+                        self.ecs_client
+                            .restart_service(cluster, &service.name)
+                            .await?;
                         self.status_message = format!("Service {} restarted", service.name);
                         self.refresh().await?;
                         self.loading = false;
@@ -692,7 +721,10 @@ impl App {
                 if let Some(cluster) = &self.selected_cluster {
                     self.loading = true;
                     self.status_message = format!("Loading logs for task: {}", task.task_id);
-                    self.logs = self.ecs_client.get_task_logs(cluster, &task.task_arn).await?;
+                    self.logs = self
+                        .ecs_client
+                        .get_task_logs(cluster, &task.task_arn)
+                        .await?;
                     self.loading = false;
                     self.log_scroll = if !self.logs.is_empty() {
                         self.logs.len().saturating_sub(1)
@@ -701,7 +733,8 @@ impl App {
                     };
                     self.auto_tail = true;
                     self.set_view(AppState::Logs);
-                    self.status_message = format!("Loaded {} log entries (auto-tail enabled)", self.logs.len());
+                    self.status_message =
+                        format!("Loaded {} log entries (auto-tail enabled)", self.logs.len());
                 }
             }
         }
@@ -715,7 +748,11 @@ impl App {
         }
         self.status_message = format!(
             "Auto-tail {}",
-            if self.auto_tail { "enabled" } else { "disabled" }
+            if self.auto_tail {
+                "enabled"
+            } else {
+                "disabled"
+            }
         );
     }
 
@@ -730,7 +767,10 @@ impl App {
     pub fn exit_log_search_mode(&mut self) {
         self.log_search_mode = false;
         let filtered_count = self.get_filtered_logs().len();
-        self.status_message = format!("Found {} logs matching '{}'", filtered_count, self.log_search_query);
+        self.status_message = format!(
+            "Found {} logs matching '{}'",
+            filtered_count, self.log_search_query
+        );
     }
 
     /// Updates the log search query.
@@ -768,9 +808,9 @@ impl App {
 
         let filter_msg = match &self.log_level_filter {
             None => "all levels".to_string(),
-            Some(level) => format!("{:?}", level),
+            Some(level) => format!("{level:?}"),
         };
-        self.status_message = format!("Log filter: {}", filter_msg);
+        self.status_message = format!("Log filter: {filter_msg}");
     }
 
     /// Returns filtered logs based on search query and level filter.
@@ -807,10 +847,11 @@ impl App {
         use std::path::PathBuf;
 
         // Expand tilde in export directory
-        let export_dir = self.config.logs.export_dir.replace('~',
+        let export_dir = self.config.logs.export_dir.replace(
+            '~',
             &dirs::home_dir()
                 .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-                .to_string_lossy()
+                .to_string_lossy(),
         );
 
         // Create export directory if it doesn't exist
@@ -821,10 +862,12 @@ impl App {
 
         // Generate filename with timestamp
         let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
-        let task_id = self.selected_task.as_ref()
+        let task_id = self
+            .selected_task
+            .as_ref()
             .map(|t| t.task_id.as_str())
             .unwrap_or("unknown");
-        let filename = format!("ecs-logs-{}-{}.txt", task_id, timestamp);
+        let filename = format!("ecs-logs-{task_id}-{timestamp}.txt");
         let file_path = export_path.join(&filename);
 
         // Get filtered logs
@@ -832,12 +875,15 @@ impl App {
 
         // Write logs to file
         let mut content = String::new();
-        content.push_str(&format!("ECS Voyager Log Export\n"));
-        content.push_str(&format!("Exported: {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
-        content.push_str(&format!("Task: {}\n", task_id));
+        content.push_str("ECS Voyager Log Export\n");
+        content.push_str(&format!(
+            "Exported: {}\n",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S")
+        ));
+        content.push_str(&format!("Task: {task_id}\n"));
         content.push_str(&format!("Total logs: {}\n", logs.len()));
         if let Some(ref filter) = self.log_level_filter {
-            content.push_str(&format!("Level filter: {:?}\n", filter));
+            content.push_str(&format!("Level filter: {filter:?}\n"));
         }
         if !self.log_search_query.is_empty() {
             content.push_str(&format!("Search query: {}\n", self.log_search_query));
@@ -847,19 +893,20 @@ impl App {
         for log in logs {
             let timestamp_str = if self.config.logs.show_timestamps {
                 let dt = chrono::DateTime::from_timestamp_millis(log.timestamp)
-                    .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S%.3f").to_string())
+                    .map(|dt| {
+                        dt.with_timezone(&chrono::Local)
+                            .format("%Y-%m-%d %H:%M:%S%.3f")
+                            .to_string()
+                    })
                     .unwrap_or_else(|| log.timestamp.to_string());
-                format!("[{}] ", dt)
+                format!("[{dt}] ")
             } else {
                 String::new()
             };
 
             content.push_str(&format!(
                 "{}[{:?}] [{}] {}\n",
-                timestamp_str,
-                log.level,
-                log.container_name,
-                log.message
+                timestamp_str, log.level, log.container_name, log.message
             ));
         }
 
@@ -880,10 +927,11 @@ impl App {
                     let cluster_name = cluster.clone();
 
                     self.loading = true;
-                    self.status_message = format!("Loading metrics for service: {}", service_name);
+                    self.status_message = format!("Loading metrics for service: {service_name}");
 
                     let time_range = self.config.metrics.time_range_minutes;
-                    self.metrics = self.ecs_client
+                    self.metrics = self
+                        .ecs_client
                         .get_service_metrics(&cluster_name, &service_name, time_range)
                         .await
                         .ok();
@@ -892,7 +940,7 @@ impl App {
                     self.set_view(AppState::Metrics);
 
                     if self.metrics.is_some() {
-                        self.status_message = format!("Metrics loaded for {}", service_name);
+                        self.status_message = format!("Metrics loaded for {service_name}");
                     } else {
                         self.status_message = "Failed to load metrics".to_string();
                     }
@@ -981,7 +1029,11 @@ impl App {
         self.modal_state = ModalState::ProfileSelector;
         self.modal_selected_index = 0;
         // Try to find current profile in the list
-        if let Some(idx) = self.available_profiles.iter().position(|p| p == &self.current_profile) {
+        if let Some(idx) = self
+            .available_profiles
+            .iter()
+            .position(|p| p == &self.current_profile)
+        {
             self.modal_selected_index = idx;
         }
     }
@@ -990,7 +1042,11 @@ impl App {
         self.modal_state = ModalState::RegionSelector;
         self.modal_selected_index = 0;
         // Try to find current region in the list
-        if let Some(idx) = self.available_regions.iter().position(|r| r == &self.current_region) {
+        if let Some(idx) = self
+            .available_regions
+            .iter()
+            .position(|r| r == &self.current_region)
+        {
             self.modal_selected_index = idx;
         }
     }
@@ -1054,10 +1110,8 @@ impl App {
         self.config.save()?;
 
         // Reinitialize AWS client
-        self.ecs_client = EcsClient::new(
-            Some(self.current_region.clone()),
-            Some(profile.clone()),
-        ).await?;
+        self.ecs_client =
+            EcsClient::new(Some(self.current_region.clone()), Some(profile.clone())).await?;
 
         self.current_profile = profile;
 
@@ -1093,10 +1147,8 @@ impl App {
         self.config.save()?;
 
         // Reinitialize AWS client
-        self.ecs_client = EcsClient::new(
-            Some(region.clone()),
-            Some(self.current_profile.clone()),
-        ).await?;
+        self.ecs_client =
+            EcsClient::new(Some(region.clone()), Some(self.current_profile.clone())).await?;
 
         self.current_region = region;
 
@@ -1127,8 +1179,8 @@ impl App {
 fn list_aws_profiles() -> Result<Vec<String>> {
     use std::fs;
 
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Failed to determine home directory"))?;
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Failed to determine home directory"))?;
 
     let credentials_path = home_dir.join(".aws").join("credentials");
 
@@ -1142,7 +1194,7 @@ fn list_aws_profiles() -> Result<Vec<String>> {
     for line in contents.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            let profile_name = trimmed[1..trimmed.len()-1].to_string();
+            let profile_name = trimmed[1..trimmed.len() - 1].to_string();
             profiles.push(profile_name);
         }
     }
@@ -1157,7 +1209,7 @@ fn list_aws_profiles() -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, AwsConfig, BehaviorConfig, UiConfig, LogsConfig, MetricsConfig};
+    use crate::config::{AwsConfig, BehaviorConfig, Config, LogsConfig, MetricsConfig, UiConfig};
     use std::mem::ManuallyDrop;
 
     // Helper function to create a test config
@@ -1457,7 +1509,7 @@ mod tests {
         app.next();
 
         assert_eq!(app.log_scroll, 1);
-        assert_eq!(app.auto_tail, false);
+        assert!(!app.auto_tail);
     }
 
     #[test]
@@ -1470,7 +1522,7 @@ mod tests {
         app.previous();
 
         assert_eq!(app.log_scroll, 4);
-        assert_eq!(app.auto_tail, false);
+        assert!(!app.auto_tail);
     }
 
     #[test]
@@ -1536,9 +1588,11 @@ mod tests {
     fn test_back_from_logs_to_tasks() {
         let mut app = create_test_app();
         app.state = AppState::Logs;
-        app.logs = vec![
-            LogEntry::new(1000, "test".to_string(), "container1".to_string()),
-        ];
+        app.logs = vec![LogEntry::new(
+            1000,
+            "test".to_string(),
+            "container1".to_string(),
+        )];
         app.log_scroll = 5;
         app.auto_tail = false;
 
@@ -1547,7 +1601,7 @@ mod tests {
         assert_eq!(app.state, AppState::Tasks);
         assert_eq!(app.logs.len(), 0);
         assert_eq!(app.log_scroll, 0);
-        assert_eq!(app.auto_tail, true);
+        assert!(app.auto_tail);
     }
 
     #[test]
@@ -1572,7 +1626,7 @@ mod tests {
 
         app.toggle_auto_tail();
 
-        assert_eq!(app.auto_tail, true);
+        assert!(app.auto_tail);
         assert_eq!(app.log_scroll, 1); // Should scroll to last log (len - 1)
         assert!(app.status_message.contains("enabled"));
     }
@@ -1584,7 +1638,7 @@ mod tests {
 
         app.toggle_auto_tail();
 
-        assert_eq!(app.auto_tail, false);
+        assert!(!app.auto_tail);
         assert!(app.status_message.contains("disabled"));
     }
 
@@ -1596,7 +1650,7 @@ mod tests {
 
         app.toggle_auto_tail();
 
-        assert_eq!(app.auto_tail, true);
+        assert!(app.auto_tail);
         // Should not panic with empty logs
     }
 
@@ -1610,7 +1664,7 @@ mod tests {
 
         app.enter_search_mode();
 
-        assert_eq!(app.search_mode, true);
+        assert!(app.search_mode);
         assert_eq!(app.search_query, "");
         assert_eq!(app.selected_index, 0);
     }
@@ -1622,7 +1676,7 @@ mod tests {
 
         app.exit_search_mode();
 
-        assert_eq!(app.search_mode, false);
+        assert!(!app.search_mode);
     }
 
     #[test]
@@ -1634,7 +1688,7 @@ mod tests {
 
         app.clear_search();
 
-        assert_eq!(app.search_mode, false);
+        assert!(!app.search_mode);
         assert_eq!(app.search_query, "");
         assert_eq!(app.selected_index, 0);
     }
@@ -1695,10 +1749,10 @@ mod tests {
         app.show_help = false;
 
         app.toggle_help();
-        assert_eq!(app.show_help, true);
+        assert!(app.show_help);
 
         app.toggle_help();
-        assert_eq!(app.show_help, false);
+        assert!(!app.show_help);
     }
 
     // Test should_refresh
@@ -1709,7 +1763,7 @@ mod tests {
         app.auto_tail = true;
         app.last_refresh = Instant::now() - Duration::from_secs(6);
 
-        assert_eq!(app.should_refresh(), true);
+        assert!(app.should_refresh());
     }
 
     #[test]
@@ -1719,7 +1773,7 @@ mod tests {
         app.auto_tail = true;
         app.last_refresh = Instant::now() - Duration::from_secs(3);
 
-        assert_eq!(app.should_refresh(), false);
+        assert!(!app.should_refresh());
     }
 
     #[test]
@@ -1728,7 +1782,7 @@ mod tests {
         app.state = AppState::Clusters;
         app.last_refresh = Instant::now() - Duration::from_secs(31);
 
-        assert_eq!(app.should_refresh(), true);
+        assert!(app.should_refresh());
     }
 
     #[test]
@@ -1737,7 +1791,7 @@ mod tests {
         app.state = AppState::Services;
         app.last_refresh = Instant::now() - Duration::from_secs(20);
 
-        assert_eq!(app.should_refresh(), false);
+        assert!(!app.should_refresh());
     }
 
     #[test]
@@ -1746,7 +1800,7 @@ mod tests {
         app.config.behavior.auto_refresh = false;
         app.last_refresh = Instant::now() - Duration::from_secs(100);
 
-        assert_eq!(app.should_refresh(), false);
+        assert!(!app.should_refresh());
     }
 
     // Test edge cases

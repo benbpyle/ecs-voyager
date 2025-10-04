@@ -186,8 +186,7 @@ impl Default for MetricsConfig {
 impl Config {
     /// Returns the path to the configuration directory (~/.ecs-voyager/)
     pub fn config_dir() -> Result<PathBuf> {
-        let home_dir = dirs::home_dir()
-            .context("Failed to determine home directory")?;
+        let home_dir = dirs::home_dir().context("Failed to determine home directory")?;
         Ok(home_dir.join(".ecs-voyager"))
     }
 
@@ -336,8 +335,8 @@ refresh_interval = 60
         }
 
         // Serialize config to TOML
-        let toml_string = toml::to_string_pretty(self)
-            .with_context(|| "Failed to serialize config to TOML")?;
+        let toml_string =
+            toml::to_string_pretty(self).with_context(|| "Failed to serialize config to TOML")?;
 
         // Write to file
         fs::write(&config_path, toml_string)
@@ -354,11 +353,11 @@ mod tests {
     #[test]
     fn test_config_defaults() {
         let config = Config::default();
-        assert_eq!(config.behavior.auto_refresh, true);
+        assert!(config.behavior.auto_refresh);
         assert_eq!(config.behavior.refresh_interval, 30);
         assert_eq!(config.behavior.default_view, "clusters");
         assert_eq!(config.ui.theme, "dark");
-        assert_eq!(config.metrics.enabled, true);
+        assert!(config.metrics.enabled);
         assert_eq!(config.metrics.time_range_minutes, 60);
         assert_eq!(config.metrics.refresh_interval, 60);
         assert!(config.aws.region.is_none());
@@ -384,7 +383,7 @@ theme = "light"
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.aws.region, Some("us-west-2".to_string()));
         assert_eq!(config.aws.profile, Some("production".to_string()));
-        assert_eq!(config.behavior.auto_refresh, false);
+        assert!(!config.behavior.auto_refresh);
         assert_eq!(config.behavior.refresh_interval, 60);
         assert_eq!(config.behavior.default_view, "services");
         assert_eq!(config.ui.theme, "light");
@@ -401,7 +400,7 @@ region = "eu-west-1"
         assert_eq!(config.aws.region, Some("eu-west-1".to_string()));
         assert_eq!(config.aws.profile, None);
         // Should use defaults for other fields
-        assert_eq!(config.behavior.auto_refresh, true);
+        assert!(config.behavior.auto_refresh);
         assert_eq!(config.behavior.refresh_interval, 30);
     }
 }
