@@ -1,6 +1,13 @@
+//! ECS Voyager - A Terminal User Interface for AWS ECS Management
+//!
+//! This application provides an interactive terminal interface for managing AWS ECS clusters,
+//! services, tasks, and viewing CloudWatch logs. It uses the ratatui framework for rendering
+//! and the AWS SDK for Rust for cloud integration.
+
 mod app;
 mod ui;
 mod aws;
+mod config;
 
 use anyhow::Result;
 use app::{App, AppState};
@@ -15,6 +22,21 @@ use ratatui::{
 };
 use std::io;
 
+/// Application entry point.
+///
+/// Initializes the terminal, creates the app instance, runs the main event loop,
+/// and ensures proper cleanup on exit. The terminal is restored to its original
+/// state even if an error occurs.
+///
+/// # Returns
+/// Returns `Ok(())` on successful execution or an error if terminal initialization,
+/// app creation, or cleanup fails.
+///
+/// # Errors
+/// This function will return an error if:
+/// - Terminal initialization fails (raw mode, alternate screen)
+/// - AWS client initialization fails
+/// - Terminal restoration fails on cleanup
 #[tokio::main]
 async fn main() -> Result<()> {
     // Setup terminal
@@ -46,6 +68,31 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Runs the main application event loop.
+///
+/// Handles terminal rendering, keyboard input processing, and periodic data refresh.
+/// The loop continues until the user presses 'q' to quit. Input handling differs
+/// based on whether search mode is active.
+///
+/// # Arguments
+/// * `terminal` - Mutable reference to the terminal backend for rendering
+/// * `app` - Mutable reference to the application state
+///
+/// # Returns
+/// Returns `Ok(())` when the user quits normally, or an error if rendering,
+/// event reading, or data operations fail.
+///
+/// # Errors
+/// This function will return an error if:
+/// - Terminal drawing fails
+/// - Event polling or reading fails
+/// - AWS API calls during refresh/select/describe operations fail
+/// - CloudWatch logs retrieval fails
+///
+/// # Event Handling
+/// - In search mode: Handles character input, backspace, enter, and escape
+/// - In normal mode: Handles navigation (↑↓/jk), selection (Enter), view switching (1-3),
+///   refresh (r), describe (d), logs (l), actions (x), and help (?)
 async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,

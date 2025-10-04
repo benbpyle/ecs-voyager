@@ -1,1 +1,33 @@
-/target
+# Rust-specific files
+/target/
+**/*.rs.bk
+**/*.rlib
+**/*.d
+**/*.gcda
+**/*.gcno
+**/*.profdata
+**/*.profraw
+**/*.prof
+**/*.crate
+**/*.lock
+
+# Cargo files
+Cargo.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.#*
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Other common files to ignore
+/build/
+/dist/
+/pkg/
+/tmp/

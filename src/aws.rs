@@ -9,8 +9,37 @@ pub struct EcsClient {
 }
 
 impl EcsClient {
-    pub async fn new() -> Result<Self> {
-        let config = aws_config::load_from_env().await;
+    /// Creates a new ECS client with optional region and profile configuration.
+    ///
+    /// # Arguments
+    /// * `region` - Optional AWS region override (e.g., "us-east-1")
+    /// * `profile` - Optional AWS profile name from ~/.aws/credentials
+    ///
+    /// # Returns
+    /// Returns a new `EcsClient` instance configured with the specified options,
+    /// or an error if AWS SDK initialization fails.
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - AWS credentials cannot be resolved
+    /// - The specified profile doesn't exist
+    /// - The specified region is invalid
+    pub async fn new(region: Option<String>, profile: Option<String>) -> Result<Self> {
+        let mut config_loader = aws_config::from_env();
+
+        // Set region if provided
+        if let Some(region_str) = region {
+            config_loader = config_loader.region(
+                aws_config::Region::new(region_str)
+            );
+        }
+
+        // Set profile if provided
+        if let Some(profile_name) = profile {
+            config_loader = config_loader.profile_name(profile_name);
+        }
+
+        let config = config_loader.load().await;
         let client = Client::new(&config);
         let logs_client = LogsClient::new(&config);
         Ok(Self { client, logs_client })
