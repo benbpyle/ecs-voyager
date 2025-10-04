@@ -34,6 +34,9 @@ The easiest way to install on macOS:
 # Tap the repository and install
 brew tap benbpyle/ecs-voyager https://github.com/benbpyle/ecs-voyager
 brew install ecs-voyager
+
+# Verify installation
+ecs-voyager --version
 ```
 
 To upgrade to the latest version:
