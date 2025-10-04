@@ -31,3 +31,10 @@ Thumbs.db
 /dist/
 /pkg/
 /tmp/
+
+# Documentation and tracking files
+requirements.md
+deployment-status.md
+homebrew-setup.md
+homebrew-tap-setup.md
+release-process.md
