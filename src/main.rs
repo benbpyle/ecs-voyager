@@ -5,9 +5,9 @@
 //! and the AWS SDK for Rust for cloud integration.
 
 mod app;
-mod ui;
 mod aws;
 mod config;
+mod ui;
 
 use anyhow::Result;
 use app::{App, AppState, ModalState};
@@ -17,10 +17,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal,
-};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 
 /// Application entry point.
@@ -173,10 +170,11 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 if app.state == AppState::Logs {
                                     match app.export_logs() {
                                         Ok(path) => {
-                                            app.status_message = format!("Logs exported to: {}", path);
+                                            app.status_message =
+                                                format!("Logs exported to: {path}");
                                         }
                                         Err(e) => {
-                                            app.status_message = format!("Export failed: {}", e);
+                                            app.status_message = format!("Export failed: {e}");
                                         }
                                     }
                                 }

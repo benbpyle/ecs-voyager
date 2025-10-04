@@ -3,11 +3,11 @@
 //! This module provides a client wrapper for AWS ECS and CloudWatch Logs services,
 //! with methods for listing clusters, services, tasks, and retrieving logs.
 
+use crate::app::{LogEntry, ServiceInfo, TaskInfo};
 use anyhow::Result;
-use aws_sdk_ecs::Client;
-use aws_sdk_cloudwatchlogs::Client as LogsClient;
 use aws_sdk_cloudwatch::Client as CloudWatchClient;
-use crate::app::{ServiceInfo, TaskInfo, LogEntry};
+use aws_sdk_cloudwatchlogs::Client as LogsClient;
+use aws_sdk_ecs::Client;
 
 /// Client for interacting with AWS ECS, CloudWatch Logs, and CloudWatch Metrics.
 ///
@@ -26,16 +26,20 @@ pub struct EcsClient {
 #[derive(Debug, Clone)]
 pub struct MetricDatapoint {
     /// Timestamp of the datapoint
+    #[allow(dead_code)]
     pub timestamp: i64,
     /// Average value
     pub average: Option<f64>,
     /// Maximum value
     pub maximum: Option<f64>,
     /// Minimum value
+    #[allow(dead_code)]
     pub minimum: Option<f64>,
     /// Sum of values
+    #[allow(dead_code)]
     pub sum: Option<f64>,
     /// Sample count
+    #[allow(dead_code)]
     pub sample_count: Option<f64>,
 }
 
@@ -69,9 +73,7 @@ impl EcsClient {
 
         // Set region if provided
         if let Some(region_str) = region {
-            config_loader = config_loader.region(
-                aws_config::Region::new(region_str)
-            );
+            config_loader = config_loader.region(aws_config::Region::new(region_str));
         }
 
         // Set profile if provided
@@ -83,7 +85,11 @@ impl EcsClient {
         let client = Client::new(&config);
         let logs_client = LogsClient::new(&config);
         let metrics_client = CloudWatchClient::new(&config);
-        Ok(Self { client, logs_client, metrics_client })
+        Ok(Self {
+            client,
+            logs_client,
+            metrics_client,
+        })
     }
 
     /// Lists all ECS clusters in the configured region.
@@ -131,11 +137,7 @@ impl EcsClient {
     /// - The cluster doesn't exist
     /// - Insufficient permissions to access the cluster or services
     pub async fn list_services(&self, cluster: &str) -> Result<Vec<ServiceInfo>> {
-        let resp = self.client
-            .list_services()
-            .cluster(cluster)
-            .send()
-            .await?;
+        let resp = self.client.list_services().cluster(cluster).send().await?;
 
         let service_arns = resp.service_arns();
 
@@ -144,7 +146,8 @@ impl EcsClient {
         }
 
         // Describe services to get detailed info
-        let describe_resp = self.client
+        let describe_resp = self
+            .client
             .describe_services()
             .cluster(cluster)
             .set_services(Some(service_arns.to_vec()))
@@ -160,7 +163,8 @@ impl EcsClient {
                 let desired_count = s.desired_count();
                 let running_count = s.running_count();
                 let pending_count = s.pending_count();
-                let launch_type = s.launch_type()
+                let launch_type = s
+                    .launch_type()
                     .map(|lt| lt.as_str().to_string())
                     .unwrap_or_else(|| "unknown".to_string());
 
@@ -197,7 +201,8 @@ impl EcsClient {
     /// - The cluster or service doesn't exist
     /// - Insufficient permissions to access tasks
     pub async fn list_tasks(&self, cluster: &str, service: &str) -> Result<Vec<TaskInfo>> {
-        let resp = self.client
+        let resp = self
+            .client
             .list_tasks()
             .cluster(cluster)
             .service_name(service)
@@ -211,7 +216,8 @@ impl EcsClient {
         }
 
         // Describe tasks to get detailed info
-        let describe_resp = self.client
+        let describe_resp = self
+            .client
             .describe_tasks()
             .cluster(cluster)
             .set_tasks(Some(task_arns.to_vec()))
@@ -223,10 +229,15 @@ impl EcsClient {
             .iter()
             .map(|t| {
                 let task_arn = t.task_arn().unwrap_or("unknown").to_string();
-                let task_id = task_arn.split('/').next_back().unwrap_or("unknown").to_string();
+                let task_id = task_arn
+                    .split('/')
+                    .next_back()
+                    .unwrap_or("unknown")
+                    .to_string();
                 let status = t.last_status().unwrap_or("unknown").to_string();
                 let desired_status = t.desired_status().unwrap_or("unknown").to_string();
-                let container_instance = t.container_instance_arn()
+                let container_instance = t
+                    .container_instance_arn()
                     .and_then(|ci| ci.split('/').next_back())
                     .unwrap_or("none")
                     .to_string();
@@ -266,7 +277,8 @@ impl EcsClient {
     /// - The service doesn't exist in the specified cluster
     /// - Insufficient permissions to describe the service
     pub async fn describe_service(&self, cluster: &str, service: &str) -> Result<String> {
-        let resp = self.client
+        let resp = self
+            .client
             .describe_services()
             .cluster(cluster)
             .services(service)
@@ -278,14 +290,26 @@ impl EcsClient {
         output.push_str(&format!("Cluster: {cluster}\n\n"));
 
         for svc in resp.services() {
-            output.push_str(&format!("Service Name: {}\n", svc.service_name().unwrap_or("N/A")));
-            output.push_str(&format!("Service ARN: {}\n", svc.service_arn().unwrap_or("N/A")));
+            output.push_str(&format!(
+                "Service Name: {}\n",
+                svc.service_name().unwrap_or("N/A")
+            ));
+            output.push_str(&format!(
+                "Service ARN: {}\n",
+                svc.service_arn().unwrap_or("N/A")
+            ));
             output.push_str(&format!("Status: {}\n", svc.status().unwrap_or("N/A")));
             output.push_str(&format!("Desired Count: {}\n", svc.desired_count()));
             output.push_str(&format!("Running Count: {}\n", svc.running_count()));
             output.push_str(&format!("Pending Count: {}\n", svc.pending_count()));
-            output.push_str(&format!("Launch Type: {}\n", svc.launch_type().map(|lt| lt.as_str()).unwrap_or("N/A")));
-            output.push_str(&format!("Task Definition: {}\n", svc.task_definition().unwrap_or("N/A")));
+            output.push_str(&format!(
+                "Launch Type: {}\n",
+                svc.launch_type().map(|lt| lt.as_str()).unwrap_or("N/A")
+            ));
+            output.push_str(&format!(
+                "Task Definition: {}\n",
+                svc.task_definition().unwrap_or("N/A")
+            ));
             output.push('\n');
         }
 
@@ -311,7 +335,8 @@ impl EcsClient {
     /// - The task doesn't exist in the specified cluster
     /// - Insufficient permissions to describe the task
     pub async fn describe_task(&self, cluster: &str, task_arn: &str) -> Result<String> {
-        let resp = self.client
+        let resp = self
+            .client
             .describe_tasks()
             .cluster(cluster)
             .tasks(task_arn)
@@ -324,18 +349,39 @@ impl EcsClient {
 
         for task in resp.tasks() {
             output.push_str(&format!("Task ARN: {}\n", task.task_arn().unwrap_or("N/A")));
-            output.push_str(&format!("Task Definition: {}\n", task.task_definition_arn().unwrap_or("N/A")));
-            output.push_str(&format!("Last Status: {}\n", task.last_status().unwrap_or("N/A")));
-            output.push_str(&format!("Desired Status: {}\n", task.desired_status().unwrap_or("N/A")));
+            output.push_str(&format!(
+                "Task Definition: {}\n",
+                task.task_definition_arn().unwrap_or("N/A")
+            ));
+            output.push_str(&format!(
+                "Last Status: {}\n",
+                task.last_status().unwrap_or("N/A")
+            ));
+            output.push_str(&format!(
+                "Desired Status: {}\n",
+                task.desired_status().unwrap_or("N/A")
+            ));
             output.push_str(&format!("CPU: {}\n", task.cpu().unwrap_or("N/A")));
             output.push_str(&format!("Memory: {}\n", task.memory().unwrap_or("N/A")));
-            output.push_str(&format!("Launch Type: {}\n", task.launch_type().map(|lt| lt.as_str()).unwrap_or("N/A")));
+            output.push_str(&format!(
+                "Launch Type: {}\n",
+                task.launch_type().map(|lt| lt.as_str()).unwrap_or("N/A")
+            ));
 
             output.push_str("\nContainers:\n");
             for container in task.containers() {
-                output.push_str(&format!("  - Name: {}\n", container.name().unwrap_or("N/A")));
-                output.push_str(&format!("    Image: {}\n", container.image().unwrap_or("N/A")));
-                output.push_str(&format!("    Last Status: {}\n", container.last_status().unwrap_or("N/A")));
+                output.push_str(&format!(
+                    "  - Name: {}\n",
+                    container.name().unwrap_or("N/A")
+                ));
+                output.push_str(&format!(
+                    "    Image: {}\n",
+                    container.image().unwrap_or("N/A")
+                ));
+                output.push_str(&format!(
+                    "    Last Status: {}\n",
+                    container.last_status().unwrap_or("N/A")
+                ));
                 if let Some(exit_code) = container.exit_code() {
                     output.push_str(&format!("    Exit Code: {exit_code}\n"));
                 }
@@ -431,7 +477,8 @@ impl EcsClient {
     /// - Insufficient permissions to access logs
     pub async fn get_task_logs(&self, cluster: &str, task_arn: &str) -> Result<Vec<LogEntry>> {
         // First, describe the task to get the task definition and container details
-        let task_resp = self.client
+        let task_resp = self
+            .client
             .describe_tasks()
             .cluster(cluster)
             .tasks(task_arn)
@@ -443,7 +490,8 @@ impl EcsClient {
         if let Some(task) = task_resp.tasks().first() {
             // Get the task definition to find log configuration
             if let Some(task_def_arn) = task.task_definition_arn() {
-                let task_def_resp = self.client
+                let task_def_resp = self
+                    .client
                     .describe_task_definition()
                     .task_definition(task_def_arn)
                     .send()
@@ -469,10 +517,18 @@ impl EcsClient {
                                             .unwrap_or("ecs");
 
                                         // Construct log stream name
-                                        let log_stream = format!("{stream_prefix}/{container_name}/{task_id}");
+                                        let log_stream =
+                                            format!("{stream_prefix}/{container_name}/{task_id}");
 
                                         // Fetch logs from CloudWatch Logs
-                                        match self.fetch_logs_from_stream(log_group, &log_stream, container_name).await {
+                                        match self
+                                            .fetch_logs_from_stream(
+                                                log_group,
+                                                &log_stream,
+                                                container_name,
+                                            )
+                                            .await
+                                        {
                                             Ok(mut logs) => all_logs.append(&mut logs),
                                             Err(e) => {
                                                 // Log stream might not exist yet or other error - continue with other containers
@@ -521,7 +577,8 @@ impl EcsClient {
         let mut logs = Vec::new();
 
         // Get the last 100 log events (you can adjust this or add pagination)
-        let resp = self.logs_client
+        let resp = self
+            .logs_client
             .get_log_events()
             .log_group_name(log_group)
             .log_stream_name(log_stream)
@@ -574,7 +631,8 @@ impl EcsClient {
         let start_time = end_time - (time_range_minutes as i64 * 60);
 
         // Fetch CPU utilization
-        let cpu_response = self.metrics_client
+        let cpu_response = self
+            .metrics_client
             .get_metric_statistics()
             .namespace("AWS/ECS")
             .metric_name("CPUUtilization")
@@ -582,16 +640,20 @@ impl EcsClient {
                 Dimension::builder()
                     .name("ServiceName")
                     .value(service_name)
-                    .build()
+                    .build(),
             )
             .dimensions(
                 Dimension::builder()
                     .name("ClusterName")
                     .value(cluster_name)
-                    .build()
+                    .build(),
             )
-            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(start_time))
-            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(end_time))
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(
+                start_time,
+            ))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(
+                end_time,
+            ))
             .period(300) // 5 minute periods
             .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
             .statistics(aws_sdk_cloudwatch::types::Statistic::Maximum)
@@ -599,7 +661,8 @@ impl EcsClient {
             .await?;
 
         // Fetch Memory utilization
-        let memory_response = self.metrics_client
+        let memory_response = self
+            .metrics_client
             .get_metric_statistics()
             .namespace("AWS/ECS")
             .metric_name("MemoryUtilization")
@@ -607,16 +670,20 @@ impl EcsClient {
                 Dimension::builder()
                     .name("ServiceName")
                     .value(service_name)
-                    .build()
+                    .build(),
             )
             .dimensions(
                 Dimension::builder()
                     .name("ClusterName")
                     .value(cluster_name)
-                    .build()
+                    .build(),
             )
-            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(start_time))
-            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(end_time))
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(
+                start_time,
+            ))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(
+                end_time,
+            ))
             .period(300)
             .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
             .statistics(aws_sdk_cloudwatch::types::Statistic::Maximum)
@@ -665,35 +732,35 @@ mod tests {
     #[test]
     fn test_cluster_arn_extraction() {
         let full_arn = "arn:aws:ecs:us-east-1:123456789012:cluster/my-cluster";
-        let extracted = full_arn.split('/').last().unwrap_or(full_arn);
+        let extracted = full_arn.split('/').next_back().unwrap_or(full_arn);
         assert_eq!(extracted, "my-cluster");
     }
 
     #[test]
     fn test_cluster_arn_extraction_simple_name() {
         let simple_name = "my-cluster";
-        let extracted = simple_name.split('/').last().unwrap_or(simple_name);
+        let extracted = simple_name.split('/').next_back().unwrap_or(simple_name);
         assert_eq!(extracted, "my-cluster");
     }
 
     #[test]
     fn test_task_id_extraction_from_arn() {
         let task_arn = "arn:aws:ecs:us-east-1:123456789012:task/cluster-name/1234567890abcdef";
-        let task_id = task_arn.split('/').last().unwrap_or("unknown");
+        let task_id = task_arn.split('/').next_back().unwrap_or("unknown");
         assert_eq!(task_id, "1234567890abcdef");
     }
 
     #[test]
     fn test_task_id_extraction_with_multiple_slashes() {
         let task_arn = "arn:aws:ecs:region:account:task/cluster/task-id";
-        let task_id = task_arn.split('/').last().unwrap_or("unknown");
+        let task_id = task_arn.split('/').next_back().unwrap_or("unknown");
         assert_eq!(task_id, "task-id");
     }
 
     #[test]
     fn test_container_instance_extraction() {
         let ci_arn = "arn:aws:ecs:us-east-1:123456789012:container-instance/abc123";
-        let ci_id = ci_arn.split('/').last().unwrap_or("none");
+        let ci_id = ci_arn.split('/').next_back().unwrap_or("none");
         assert_eq!(ci_id, "abc123");
     }
 
@@ -701,7 +768,7 @@ mod tests {
     fn test_container_instance_extraction_none() {
         let ci_arn_option: Option<&str> = None;
         let ci_id = ci_arn_option
-            .and_then(|ci| ci.split('/').last())
+            .and_then(|ci| ci.split('/').next_back())
             .unwrap_or("none");
         assert_eq!(ci_id, "none");
     }
@@ -712,8 +779,8 @@ mod tests {
         let stream_prefix = "ecs";
         let container_name = "nginx";
         let task_id = "abc123def456";
-        
-        let log_stream = format!("{}/{}/{}", stream_prefix, container_name, task_id);
+
+        let log_stream = format!("{stream_prefix}/{container_name}/{task_id}");
         assert_eq!(log_stream, "ecs/nginx/abc123def456");
     }
 
@@ -722,8 +789,8 @@ mod tests {
         let stream_prefix = "my-app";
         let container_name = "web-server";
         let task_id = "12345";
-        
-        let log_stream = format!("{}/{}/{}", stream_prefix, container_name, task_id);
+
+        let log_stream = format!("{stream_prefix}/{container_name}/{task_id}");
         assert_eq!(log_stream, "my-app/web-server/12345");
     }
 
@@ -760,7 +827,10 @@ mod tests {
             memory: "512".to_string(),
         };
 
-        assert_eq!(task.task_arn, "arn:aws:ecs:us-east-1:123456789012:task/task-id");
+        assert_eq!(
+            task.task_arn,
+            "arn:aws:ecs:us-east-1:123456789012:task/task-id"
+        );
         assert_eq!(task.task_id, "task-id");
         assert_eq!(task.status, "RUNNING");
         assert_eq!(task.desired_status, "RUNNING");
@@ -772,7 +842,11 @@ mod tests {
     // Test LogEntry construction and ordering
     #[test]
     fn test_log_entry_creation() {
-        let log = LogEntry::new(1234567890, "Test log message".to_string(), "web".to_string());
+        let log = LogEntry::new(
+            1234567890,
+            "Test log message".to_string(),
+            "web".to_string(),
+        );
 
         assert_eq!(log.timestamp, 1234567890);
         assert_eq!(log.message, "Test log message");
@@ -781,7 +855,7 @@ mod tests {
 
     #[test]
     fn test_log_entries_sorting() {
-        let mut logs = vec![
+        let mut logs = [
             LogEntry::new(3000, "third".to_string(), "web".to_string()),
             LogEntry::new(1000, "first".to_string(), "web".to_string()),
             LogEntry::new(2000, "second".to_string(), "web".to_string()),
@@ -799,7 +873,7 @@ mod tests {
 
     #[test]
     fn test_log_entries_with_same_timestamp() {
-        let mut logs = vec![
+        let mut logs = [
             LogEntry::new(1000, "log A".to_string(), "container1".to_string()),
             LogEntry::new(1000, "log B".to_string(), "container2".to_string()),
         ];
@@ -856,8 +930,7 @@ mod tests {
         let pending = 0;
 
         let description = format!(
-            "Cluster: {}\n\nService Name: {}\nStatus: {}\nDesired Count: {}\nRunning Count: {}\nPending Count: {}\n",
-            cluster, service_name, status, desired, running, pending
+            "Cluster: {cluster}\n\nService Name: {service_name}\nStatus: {status}\nDesired Count: {desired}\nRunning Count: {running}\nPending Count: {pending}\n"
         );
 
         assert!(description.contains("Cluster: my-cluster"));
@@ -873,10 +946,8 @@ mod tests {
         let task_arn = "arn:aws:ecs:region:account:task/task-id";
         let status = "RUNNING";
 
-        let description = format!(
-            "Cluster: {}\n\nTask ARN: {}\nLast Status: {}\n",
-            cluster, task_arn, status
-        );
+        let description =
+            format!("Cluster: {cluster}\n\nTask ARN: {task_arn}\nLast Status: {status}\n");
 
         assert!(description.contains("Cluster: my-cluster"));
         assert!(description.contains("Task ARN: arn:aws:ecs"));
@@ -915,7 +986,7 @@ mod tests {
     // Test multi-container scenario
     #[test]
     fn test_multiple_container_logs() {
-        let logs = vec![
+        let logs = [
             LogEntry::new(1000, "Web server started".to_string(), "web".to_string()),
             LogEntry::new(2000, "Database connected".to_string(), "db".to_string()),
             LogEntry::new(3000, "Cache initialized".to_string(), "redis".to_string()),
@@ -931,7 +1002,7 @@ mod tests {
     #[test]
     fn test_service_name_extraction() {
         let service_arn = "arn:aws:ecs:us-east-1:123456789012:service/cluster-name/service-name";
-        let service_name = service_arn.split('/').last().unwrap_or("unknown");
+        let service_name = service_arn.split('/').next_back().unwrap_or("unknown");
         assert_eq!(service_name, "service-name");
     }
 
@@ -979,7 +1050,7 @@ mod tests {
             launch_type: "EC2".to_string(),
         };
 
-        let debug_string = format!("{:?}", service);
+        let debug_string = format!("{service:?}");
         assert!(debug_string.contains("test"));
         assert!(debug_string.contains("ACTIVE"));
     }
@@ -996,7 +1067,7 @@ mod tests {
             memory: "512".to_string(),
         };
 
-        let debug_string = format!("{:?}", task);
+        let debug_string = format!("{task:?}");
         assert!(debug_string.contains("arn:test"));
         assert!(debug_string.contains("RUNNING"));
     }
@@ -1005,7 +1076,7 @@ mod tests {
     fn test_log_entry_debug() {
         let log = LogEntry::new(123, "test message".to_string(), "web".to_string());
 
-        let debug_string = format!("{:?}", log);
+        let debug_string = format!("{log:?}");
         assert!(debug_string.contains("test message"));
         assert!(debug_string.contains("123"));
     }

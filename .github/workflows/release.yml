@@ -85,22 +85,44 @@ jobs:
           # Update version
           sed -i "s/version \".*\"/version \"${VERSION#v}\"/" Formula/ecs-voyager.rb
 
-          # Update x86_64 SHA256
-          sed -i "s/PLACEHOLDER_X86_64_SHA256/${X86_64_SHA256}/" Formula/ecs-voyager.rb
-
-          # Update ARM64 SHA256
-          sed -i "s/PLACEHOLDER_ARM64_SHA256/${AARCH64_SHA256}/" Formula/ecs-voyager.rb
-
           # Update URLs with new version
           sed -i "s|download/v[0-9]\+\.[0-9]\+\.[0-9]\+/|download/${VERSION}/|g" Formula/ecs-voyager.rb
+
+          # Update ARM64 SHA256 (find the sha256 line after aarch64-apple-darwin)
+          sed -i "/aarch64-apple-darwin.tar.gz/,/sha256/ s/sha256 \".*\"/sha256 \"${AARCH64_SHA256}\"/" Formula/ecs-voyager.rb
+
+          # Update x86_64 SHA256 (find the sha256 line after x86_64-apple-darwin)
+          sed -i "/x86_64-apple-darwin.tar.gz/,/sha256/ s/sha256 \".*\"/sha256 \"${X86_64_SHA256}\"/" Formula/ecs-voyager.rb
 
       - name: Commit and push updated formula
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Check if there are changes
+          if git diff --quiet Formula/ecs-voyager.rb; then
+            echo "No changes to formula, skipping commit"
+            exit 0
+          fi
+
+          # Show the diff for debugging
+          echo "Formula changes:"
+          git diff Formula/ecs-voyager.rb
+
+          # Commit and push
           git add Formula/ecs-voyager.rb
-          git commit -m "Update Homebrew formula to ${VERSION}" || echo "No changes to commit"
-          git push origin HEAD:master || echo "Failed to push, may need manual update"
+          git commit -m "chore: update Homebrew formula to ${VERSION}
+
+Auto-updated by release workflow:
+- Version: ${VERSION#v}
+- ARM64 SHA256: ${AARCH64_SHA256}
+- x86_64 SHA256: ${X86_64_SHA256}"
+
+          # Pull latest changes to avoid conflicts
+          git pull --rebase origin master || true
+
+          # Push to master
+          git push origin HEAD:master
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

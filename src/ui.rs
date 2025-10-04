@@ -4,15 +4,15 @@
 //! It defines functions for drawing different views (clusters, services, tasks, logs)
 //! and UI components (header, footer, overlays).
 
+use chrono::{DateTime, Local};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect, Alignment},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table, Wrap, Clear},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Row, Table, Wrap},
     Frame,
 };
 use std::time::SystemTime;
-use chrono::{DateTime, Local};
 
 use crate::app::{App, AppState, ModalState};
 
@@ -28,9 +28,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(0),      // Content
-            Constraint::Length(5),  // Footer (multi-line)
+            Constraint::Length(3), // Header
+            Constraint::Min(0),    // Content
+            Constraint::Length(5), // Footer (multi-line)
         ])
         .split(f.area());
 
@@ -89,20 +89,32 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
         }
         AppState::Tasks => {
             if let (Some(cluster), Some(service)) = (&app.selected_cluster, &app.selected_service) {
-                return draw_custom_header(f, area, &format!("ECS Voyager - Tasks ({cluster}/{service})"));
+                return draw_custom_header(
+                    f,
+                    area,
+                    &format!("ECS Voyager - Tasks ({cluster}/{service})"),
+                );
             }
             "ECS Voyager - Tasks"
         }
         AppState::Details => "ECS Voyager - Details",
         AppState::Logs => {
             if let Some(task) = &app.selected_task {
-                return draw_custom_header(f, area, &format!("ECS Voyager - Logs (Task: {})", task.task_id));
+                return draw_custom_header(
+                    f,
+                    area,
+                    &format!("ECS Voyager - Logs (Task: {})", task.task_id),
+                );
             }
             "ECS Voyager - Logs"
         }
         AppState::Metrics => {
             if let Some(service) = &app.selected_service {
-                return draw_custom_header(f, area, &format!("ECS Voyager - Metrics (Service: {})", service));
+                return draw_custom_header(
+                    f,
+                    area,
+                    &format!("ECS Voyager - Metrics (Service: {service})"),
+                );
             }
             "ECS Voyager - Metrics"
         }
@@ -121,7 +133,11 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
 /// * `title` - The title text to display
 fn draw_custom_header(f: &mut Frame, area: Rect, title: &str) {
     let header = Paragraph::new(title)
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(header, area);
 }
@@ -139,42 +155,89 @@ fn draw_custom_header(f: &mut Frame, area: Rect, title: &str) {
 /// * `app` - The application state
 fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     let footer_text = if app.show_help {
-        vec![
-            Line::from(vec![
-                Span::styled("Press ", Style::default().fg(Color::Gray)),
-                Span::styled("?", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(" to close help", Style::default().fg(Color::Gray)),
-            ])
-        ]
+        vec![Line::from(vec![
+            Span::styled("Press ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                "?",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" to close help", Style::default().fg(Color::Gray)),
+        ])]
     } else {
         // Line 1: Keybindings
         let line1 = Line::from(vec![
             Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("q", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "q",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(":quit ", Style::default().fg(Color::Gray)),
-            Span::styled("?", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "?",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(":help ", Style::default().fg(Color::Gray)),
-            Span::styled("r", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "r",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(":refresh ", Style::default().fg(Color::Gray)),
-            Span::styled("P", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "P",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(":profile ", Style::default().fg(Color::Gray)),
-            Span::styled("R", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "R",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(":region", Style::default().fg(Color::Gray)),
             Span::styled("] ", Style::default().fg(Color::DarkGray)),
             Span::styled("• ", Style::default().fg(Color::DarkGray)),
             Span::styled("[", Style::default().fg(Color::DarkGray)),
-            Span::styled("1-3", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "1-3",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(":views ", Style::default().fg(Color::Gray)),
-            Span::styled("↑↓/jk", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "↑↓/jk",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(":nav ", Style::default().fg(Color::Gray)),
-            Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Enter",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(":select", Style::default().fg(Color::Gray)),
             Span::styled("]", Style::default().fg(Color::DarkGray)),
         ]);
 
         // Line 2: AWS context and status
         let connection_indicator = if app.loading { "○" } else { "●" };
-        let connection_color = if app.loading { Color::Yellow } else { Color::Green };
+        let connection_color = if app.loading {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
         let status_text = if app.loading {
             format!("{} {}", get_spinner(), app.status_message)
         } else {
@@ -192,10 +255,20 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
 
         let line2 = Line::from(vec![
             Span::styled("Region: ", Style::default().fg(Color::Gray)),
-            Span::styled(&app.current_region, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &app.current_region,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" | ", Style::default().fg(Color::DarkGray)),
             Span::styled("Profile: ", Style::default().fg(Color::Gray)),
-            Span::styled(&app.current_profile, Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &app.current_profile,
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" | ", Style::default().fg(Color::DarkGray)),
             Span::styled(connection_indicator, Style::default().fg(connection_color)),
             Span::styled(" ", Style::default()),
@@ -229,8 +302,15 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(auto_refresh_status, Style::default().fg(Color::White)),
             if app.search_mode || !app.search_query.is_empty() {
                 Span::styled(
-                    format!(" | Search: {}", if app.search_query.is_empty() { "_" } else { &app.search_query }),
-                    Style::default().fg(Color::Yellow)
+                    format!(
+                        " | Search: {}",
+                        if app.search_query.is_empty() {
+                            "_"
+                        } else {
+                            &app.search_query
+                        }
+                    ),
+                    Style::default().fg(Color::Yellow),
                 )
             } else {
                 Span::raw("")
@@ -240,8 +320,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
         vec![line1, line2, line3]
     };
 
-    let footer = Paragraph::new(footer_text)
-        .block(Block::default().borders(Borders::ALL));
+    let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::ALL));
     f.render_widget(footer, area);
 }
 
@@ -275,17 +354,19 @@ fn draw_clusters(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let title = if app.search_query.is_empty() {
-        format!("Clusters ({}) - /:search | Enter:select", filtered_clusters.len())
+        format!(
+            "Clusters ({}) - /:search | Enter:select",
+            filtered_clusters.len()
+        )
     } else {
-        format!("Clusters ({}/{}) - Esc:clear | Enter:select", filtered_clusters.len(), app.clusters.len())
+        format!(
+            "Clusters ({}/{}) - Esc:clear | Enter:select",
+            filtered_clusters.len(),
+            app.clusters.len()
+        )
     };
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL),
-        );
+    let list = List::new(items).block(Block::default().title(title).borders(Borders::ALL));
 
     f.render_widget(list, area);
 }
@@ -303,9 +384,20 @@ fn draw_clusters(f: &mut Frame, area: Rect, app: &App) {
 fn draw_services(f: &mut Frame, area: Rect, app: &App) {
     let filtered_services = app.get_filtered_services();
 
-    let header = Row::new(vec!["Name", "Status", "Desired", "Running", "Pending", "Launch Type"])
-        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-        .bottom_margin(1);
+    let header = Row::new(vec![
+        "Name",
+        "Status",
+        "Desired",
+        "Running",
+        "Pending",
+        "Launch Type",
+    ])
+    .style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )
+    .bottom_margin(1);
 
     let rows: Vec<Row> = filtered_services
         .iter()
@@ -333,9 +425,16 @@ fn draw_services(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let title = if app.search_query.is_empty() {
-        format!("Services ({}) - /:search | Enter:tasks | d:describe | x:restart", filtered_services.len())
+        format!(
+            "Services ({}) - /:search | Enter:tasks | d:describe | x:restart",
+            filtered_services.len()
+        )
     } else {
-        format!("Services ({}/{}) - Esc:clear | Enter:tasks | d:describe | x:restart", filtered_services.len(), app.services.len())
+        format!(
+            "Services ({}/{}) - Esc:clear | Enter:tasks | d:describe | x:restart",
+            filtered_services.len(),
+            app.services.len()
+        )
     };
 
     let table = Table::new(
@@ -350,11 +449,7 @@ fn draw_services(f: &mut Frame, area: Rect, app: &App) {
         ],
     )
     .header(header)
-    .block(
-        Block::default()
-            .title(title)
-            .borders(Borders::ALL),
-    );
+    .block(Block::default().title(title).borders(Borders::ALL));
 
     f.render_widget(table, area);
 }
@@ -372,9 +467,15 @@ fn draw_services(f: &mut Frame, area: Rect, app: &App) {
 fn draw_tasks(f: &mut Frame, area: Rect, app: &App) {
     let filtered_tasks = app.get_filtered_tasks();
 
-    let header = Row::new(vec!["Task ID", "Status", "Desired", "Instance", "CPU", "Memory"])
-        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-        .bottom_margin(1);
+    let header = Row::new(vec![
+        "Task ID", "Status", "Desired", "Instance", "CPU", "Memory",
+    ])
+    .style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )
+    .bottom_margin(1);
 
     let rows: Vec<Row> = filtered_tasks
         .iter()
@@ -402,9 +503,16 @@ fn draw_tasks(f: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let title = if app.search_query.is_empty() {
-        format!("Tasks ({}) - /:search | l:logs | d:describe | x:stop", filtered_tasks.len())
+        format!(
+            "Tasks ({}) - /:search | l:logs | d:describe | x:stop",
+            filtered_tasks.len()
+        )
     } else {
-        format!("Tasks ({}/{}) - Esc:clear | l:logs | d:describe | x:stop", filtered_tasks.len(), app.tasks.len())
+        format!(
+            "Tasks ({}/{}) - Esc:clear | l:logs | d:describe | x:stop",
+            filtered_tasks.len(),
+            app.tasks.len()
+        )
     };
 
     let table = Table::new(
@@ -419,11 +527,7 @@ fn draw_tasks(f: &mut Frame, area: Rect, app: &App) {
         ],
     )
     .header(header)
-    .block(
-        Block::default()
-            .title(title)
-            .borders(Borders::ALL),
-    );
+    .block(Block::default().title(title).borders(Borders::ALL));
 
     f.render_widget(table, area);
 }
@@ -496,7 +600,8 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     let start_idx = if app.auto_tail {
         total_logs.saturating_sub(available_height)
     } else {
-        app.log_scroll.min(total_logs.saturating_sub(available_height.min(total_logs)))
+        app.log_scroll
+            .min(total_logs.saturating_sub(available_height.min(total_logs)))
     };
 
     let end_idx = (start_idx + available_height).min(total_logs);
@@ -521,10 +626,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
                     format!("[{}] ", log.container_name),
                     Style::default().fg(Color::Cyan),
                 ),
-                Span::styled(
-                    &log.message,
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled(&log.message, Style::default().fg(Color::White)),
             ])
         })
         .collect();
@@ -539,7 +641,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     // Build filter/search status
     let mut filter_status = String::new();
     if let Some(ref level) = app.log_level_filter {
-        filter_status.push_str(&format!(" | Filter: {:?}", level));
+        filter_status.push_str(&format!(" | Filter: {level:?}"));
     }
     if !app.log_search_query.is_empty() {
         filter_status.push_str(&format!(" | Search: '{}'", app.log_search_query));
@@ -557,7 +659,11 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .title(title)
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(if app.auto_tail { Color::Green } else { Color::White })),
+                .border_style(Style::default().fg(if app.auto_tail {
+                    Color::Green
+                } else {
+                    Color::White
+                })),
         )
         .wrap(Wrap { trim: false });
 
@@ -573,7 +679,6 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 /// * `area` - The rectangular area allocated for the metrics view
 /// * `app` - The application state containing metrics data
 fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
-
     if app.metrics.is_none() {
         let no_metrics = Paragraph::new("No metrics available for this service.\n\nThis could mean:\n- The service has no CloudWatch metrics enabled\n- The service hasn't been running long enough to generate metrics\n- There was an error fetching metrics")
             .style(Style::default().fg(Color::Yellow))
@@ -591,32 +696,46 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
     let mut content_lines: Vec<Line> = vec![];
 
     // CPU Metrics Section
-    content_lines.push(Line::from(vec![
-        Span::styled("CPU Utilization", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-    ]));
+    content_lines.push(Line::from(vec![Span::styled(
+        "CPU Utilization",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
     content_lines.push(Line::from(""));
 
     if metrics.cpu_datapoints.is_empty() {
-        content_lines.push(Line::from(Span::styled("  No CPU data available", Style::default().fg(Color::Yellow))));
+        content_lines.push(Line::from(Span::styled(
+            "  No CPU data available",
+            Style::default().fg(Color::Yellow),
+        )));
     } else {
-        let avg_cpu: f64 = metrics.cpu_datapoints.iter()
+        let avg_cpu: f64 = metrics
+            .cpu_datapoints
+            .iter()
             .filter_map(|dp| dp.average)
-            .sum::<f64>() / metrics.cpu_datapoints.len() as f64;
-        let max_cpu = metrics.cpu_datapoints.iter()
+            .sum::<f64>()
+            / metrics.cpu_datapoints.len() as f64;
+        let max_cpu = metrics
+            .cpu_datapoints
+            .iter()
             .filter_map(|dp| dp.maximum)
             .fold(0.0f64, |a, b| a.max(b));
 
         content_lines.push(Line::from(vec![
             Span::styled("  Average: ", Style::default().fg(Color::Gray)),
-            Span::styled(format!("{:.2}%", avg_cpu), Style::default().fg(Color::Green)),
+            Span::styled(format!("{avg_cpu:.2}%"), Style::default().fg(Color::Green)),
         ]));
         content_lines.push(Line::from(vec![
             Span::styled("  Maximum: ", Style::default().fg(Color::Gray)),
-            Span::styled(format!("{:.2}%", max_cpu), Style::default().fg(Color::Yellow)),
+            Span::styled(format!("{max_cpu:.2}%"), Style::default().fg(Color::Yellow)),
         ]));
         content_lines.push(Line::from(vec![
             Span::styled("  Data points: ", Style::default().fg(Color::Gray)),
-            Span::styled(format!("{}", metrics.cpu_datapoints.len()), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{}", metrics.cpu_datapoints.len()),
+                Style::default().fg(Color::White),
+            ),
         ]));
     }
 
@@ -624,32 +743,46 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
     content_lines.push(Line::from(""));
 
     // Memory Metrics Section
-    content_lines.push(Line::from(vec![
-        Span::styled("Memory Utilization", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-    ]));
+    content_lines.push(Line::from(vec![Span::styled(
+        "Memory Utilization",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
     content_lines.push(Line::from(""));
 
     if metrics.memory_datapoints.is_empty() {
-        content_lines.push(Line::from(Span::styled("  No Memory data available", Style::default().fg(Color::Yellow))));
+        content_lines.push(Line::from(Span::styled(
+            "  No Memory data available",
+            Style::default().fg(Color::Yellow),
+        )));
     } else {
-        let avg_mem: f64 = metrics.memory_datapoints.iter()
+        let avg_mem: f64 = metrics
+            .memory_datapoints
+            .iter()
             .filter_map(|dp| dp.average)
-            .sum::<f64>() / metrics.memory_datapoints.len() as f64;
-        let max_mem = metrics.memory_datapoints.iter()
+            .sum::<f64>()
+            / metrics.memory_datapoints.len() as f64;
+        let max_mem = metrics
+            .memory_datapoints
+            .iter()
             .filter_map(|dp| dp.maximum)
             .fold(0.0f64, |a, b| a.max(b));
 
         content_lines.push(Line::from(vec![
             Span::styled("  Average: ", Style::default().fg(Color::Gray)),
-            Span::styled(format!("{:.2}%", avg_mem), Style::default().fg(Color::Green)),
+            Span::styled(format!("{avg_mem:.2}%"), Style::default().fg(Color::Green)),
         ]));
         content_lines.push(Line::from(vec![
             Span::styled("  Maximum: ", Style::default().fg(Color::Gray)),
-            Span::styled(format!("{:.2}%", max_mem), Style::default().fg(Color::Yellow)),
+            Span::styled(format!("{max_mem:.2}%"), Style::default().fg(Color::Yellow)),
         ]));
         content_lines.push(Line::from(vec![
             Span::styled("  Data points: ", Style::default().fg(Color::Gray)),
-            Span::styled(format!("{}", metrics.memory_datapoints.len()), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{}", metrics.memory_datapoints.len()),
+                Style::default().fg(Color::White),
+            ),
         ]));
     }
 
@@ -658,7 +791,9 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
         .style(Style::default().fg(Color::White))
         .block(
             Block::default()
-                .title(format!("Metrics (Last {} min | r:refresh | Esc/h:back)", time_range))
+                .title(format!(
+                    "Metrics (Last {time_range} min | r:refresh | Esc/h:back)"
+                ))
                 .borders(Borders::ALL),
         )
         .wrap(Wrap { trim: false });
@@ -678,9 +813,12 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
 fn draw_help(f: &mut Frame, area: Rect) {
     let help_text = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Navigation", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Navigation",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("  ↑/k         ", Style::default().fg(Color::Yellow)),
             Span::raw("Move up"),
@@ -698,9 +836,12 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Go back"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Views", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Views",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("  1           ", Style::default().fg(Color::Yellow)),
             Span::raw("Clusters view"),
@@ -714,9 +855,12 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Tasks view"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Actions", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Actions",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("  r           ", Style::default().fg(Color::Yellow)),
             Span::raw("Refresh current view"),
@@ -762,9 +906,12 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Execute action (restart service/stop task)"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("General", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "General",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::styled("  ?           ", Style::default().fg(Color::Yellow)),
             Span::raw("Toggle this help"),
@@ -775,12 +922,8 @@ fn draw_help(f: &mut Frame, area: Rect) {
         ]),
     ];
 
-    let help = Paragraph::new(help_text)
-        .block(
-            Block::default()
-                .title("Help")
-                .borders(Borders::ALL),
-        );
+    let help =
+        Paragraph::new(help_text).block(Block::default().title("Help").borders(Borders::ALL));
 
     f.render_widget(help, area);
 }
@@ -812,21 +955,17 @@ fn draw_loading_overlay(f: &mut Frame, app: &App) {
     let spinner = get_spinner();
     let loading_text = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled(
-                format!("  {spinner}  "),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        Line::from(vec![Span::styled(
+            format!("  {spinner}  "),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled(
-                &app.status_message,
-                Style::default().fg(Color::Yellow),
-            ),
-        ]),
+        Line::from(vec![Span::styled(
+            &app.status_message,
+            Style::default().fg(Color::Yellow),
+        )]),
         Line::from(""),
     ];
 
@@ -929,7 +1068,8 @@ fn draw_profile_selector(f: &mut Frame, app: &App) {
     f.render_widget(Clear, modal_area);
 
     // Create list items
-    let items: Vec<ListItem> = app.available_profiles
+    let items: Vec<ListItem> = app
+        .available_profiles
         .iter()
         .enumerate()
         .map(|(i, profile)| {
@@ -957,14 +1097,13 @@ fn draw_profile_selector(f: &mut Frame, app: &App) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title("Select AWS Profile (↑↓:navigate | Enter:select | Esc:cancel)")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan))
-                .style(Style::default().bg(Color::Black)),
-        );
+    let list = List::new(items).block(
+        Block::default()
+            .title("Select AWS Profile (↑↓:navigate | Enter:select | Esc:cancel)")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .style(Style::default().bg(Color::Black)),
+    );
 
     f.render_widget(list, modal_area);
 }
@@ -994,7 +1133,8 @@ fn draw_region_selector(f: &mut Frame, app: &App) {
     f.render_widget(Clear, modal_area);
 
     // Create list items
-    let items: Vec<ListItem> = app.available_regions
+    let items: Vec<ListItem> = app
+        .available_regions
         .iter()
         .enumerate()
         .map(|(i, region)| {
@@ -1022,14 +1162,13 @@ fn draw_region_selector(f: &mut Frame, app: &App) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title("Select AWS Region (↑↓:navigate | Enter:select | Esc:cancel)")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan))
-                .style(Style::default().bg(Color::Black)),
-        );
+    let list = List::new(items).block(
+        Block::default()
+            .title("Select AWS Region (↑↓:navigate | Enter:select | Esc:cancel)")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .style(Style::default().bg(Color::Black)),
+    );
 
     f.render_widget(list, modal_area);
 }
