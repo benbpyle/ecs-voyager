@@ -123,17 +123,8 @@ jobs:
           git push origin "${BRANCH_NAME}"
 
           # Create PR
-          PR_BODY="Auto-generated PR to update Homebrew formula after release ${VERSION}
-
-**Changes:**
-- Version: ${VERSION#v}
-- ARM64 SHA256: ${AARCH64_SHA256}
-- x86_64 SHA256: ${X86_64_SHA256}
-
-This PR was automatically created by the release workflow."
-
           gh pr create \
             --title "chore: update Homebrew formula to ${VERSION}" \
-            --body "${PR_BODY}" \
+            --body "Auto-generated PR to update Homebrew formula for release ${VERSION}. Updated version to ${VERSION#v} with new SHA256 checksums." \
             --base master \
             --head "${BRANCH_NAME}"
