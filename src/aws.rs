@@ -6,9 +6,10 @@
 use anyhow::Result;
 use aws_sdk_ecs::Client;
 use aws_sdk_cloudwatchlogs::Client as LogsClient;
+use aws_sdk_cloudwatch::Client as CloudWatchClient;
 use crate::app::{ServiceInfo, TaskInfo, LogEntry};
 
-/// Client for interacting with AWS ECS and CloudWatch Logs.
+/// Client for interacting with AWS ECS, CloudWatch Logs, and CloudWatch Metrics.
 ///
 /// Wraps the AWS SDK clients and provides convenient methods for common operations
 /// used by the TUI application.
@@ -17,6 +18,34 @@ pub struct EcsClient {
     client: Client,
     /// AWS CloudWatch Logs SDK client
     logs_client: LogsClient,
+    /// AWS CloudWatch Metrics SDK client
+    metrics_client: CloudWatchClient,
+}
+
+/// Represents a CloudWatch metric datapoint.
+#[derive(Debug, Clone)]
+pub struct MetricDatapoint {
+    /// Timestamp of the datapoint
+    pub timestamp: i64,
+    /// Average value
+    pub average: Option<f64>,
+    /// Maximum value
+    pub maximum: Option<f64>,
+    /// Minimum value
+    pub minimum: Option<f64>,
+    /// Sum of values
+    pub sum: Option<f64>,
+    /// Sample count
+    pub sample_count: Option<f64>,
+}
+
+/// Container for service or task metrics.
+#[derive(Debug, Clone)]
+pub struct Metrics {
+    /// CPU utilization percentage datapoints
+    pub cpu_datapoints: Vec<MetricDatapoint>,
+    /// Memory utilization percentage datapoints
+    pub memory_datapoints: Vec<MetricDatapoint>,
 }
 
 impl EcsClient {
@@ -53,7 +82,8 @@ impl EcsClient {
         let config = config_loader.load().await;
         let client = Client::new(&config);
         let logs_client = LogsClient::new(&config);
-        Ok(Self { client, logs_client })
+        let metrics_client = CloudWatchClient::new(&config);
+        Ok(Self { client, logs_client, metrics_client })
     }
 
     /// Lists all ECS clusters in the configured region.
@@ -511,6 +541,119 @@ impl EcsClient {
         }
 
         Ok(logs)
+    }
+
+    /// Fetches CloudWatch metrics for an ECS service.
+    ///
+    /// Retrieves CPU and Memory utilization metrics for the specified service
+    /// over the configured time range.
+    ///
+    /// # Arguments
+    /// * `cluster_name` - Name of the ECS cluster
+    /// * `service_name` - Name of the ECS service
+    /// * `time_range_minutes` - Number of minutes of historical data to fetch
+    ///
+    /// # Returns
+    /// Returns `Metrics` containing CPU and memory datapoints
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The AWS GetMetricStatistics API call fails
+    /// - Insufficient permissions to read metrics
+    pub async fn get_service_metrics(
+        &self,
+        cluster_name: &str,
+        service_name: &str,
+        time_range_minutes: i32,
+    ) -> Result<Metrics> {
+        use aws_sdk_cloudwatch::types::Dimension;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now = SystemTime::now();
+        let end_time = now.duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        let start_time = end_time - (time_range_minutes as i64 * 60);
+
+        // Fetch CPU utilization
+        let cpu_response = self.metrics_client
+            .get_metric_statistics()
+            .namespace("AWS/ECS")
+            .metric_name("CPUUtilization")
+            .dimensions(
+                Dimension::builder()
+                    .name("ServiceName")
+                    .value(service_name)
+                    .build()
+            )
+            .dimensions(
+                Dimension::builder()
+                    .name("ClusterName")
+                    .value(cluster_name)
+                    .build()
+            )
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(start_time))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(end_time))
+            .period(300) // 5 minute periods
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Maximum)
+            .send()
+            .await?;
+
+        // Fetch Memory utilization
+        let memory_response = self.metrics_client
+            .get_metric_statistics()
+            .namespace("AWS/ECS")
+            .metric_name("MemoryUtilization")
+            .dimensions(
+                Dimension::builder()
+                    .name("ServiceName")
+                    .value(service_name)
+                    .build()
+            )
+            .dimensions(
+                Dimension::builder()
+                    .name("ClusterName")
+                    .value(cluster_name)
+                    .build()
+            )
+            .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(start_time))
+            .end_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(end_time))
+            .period(300)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
+            .statistics(aws_sdk_cloudwatch::types::Statistic::Maximum)
+            .send()
+            .await?;
+
+        // Convert datapoints
+        let cpu_datapoints = cpu_response
+            .datapoints()
+            .iter()
+            .map(|dp| MetricDatapoint {
+                timestamp: dp.timestamp().map(|t| t.secs()).unwrap_or(0),
+                average: dp.average(),
+                maximum: dp.maximum(),
+                minimum: dp.minimum(),
+                sum: dp.sum(),
+                sample_count: dp.sample_count(),
+            })
+            .collect();
+
+        let memory_datapoints = memory_response
+            .datapoints()
+            .iter()
+            .map(|dp| MetricDatapoint {
+                timestamp: dp.timestamp().map(|t| t.secs()).unwrap_or(0),
+                average: dp.average(),
+                maximum: dp.maximum(),
+                minimum: dp.minimum(),
+                sum: dp.sum(),
+                sample_count: dp.sample_count(),
+            })
+            .collect();
+
+        Ok(Metrics {
+            cpu_datapoints,
+            memory_datapoints,
+        })
     }
 }
 

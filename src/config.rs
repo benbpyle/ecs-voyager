@@ -358,6 +358,9 @@ mod tests {
         assert_eq!(config.behavior.refresh_interval, 30);
         assert_eq!(config.behavior.default_view, "clusters");
         assert_eq!(config.ui.theme, "dark");
+        assert_eq!(config.metrics.enabled, true);
+        assert_eq!(config.metrics.time_range_minutes, 60);
+        assert_eq!(config.metrics.refresh_interval, 60);
         assert!(config.aws.region.is_none());
         assert!(config.aws.profile.is_none());
     }

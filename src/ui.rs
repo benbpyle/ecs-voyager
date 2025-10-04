@@ -45,6 +45,7 @@ pub fn draw(f: &mut Frame, app: &App) {
             AppState::Tasks => draw_tasks(f, chunks[1], app),
             AppState::Details => draw_details(f, chunks[1], app),
             AppState::Logs => draw_logs(f, chunks[1], app),
+            AppState::Metrics => draw_metrics(f, chunks[1], app),
         }
     }
 
@@ -98,6 +99,12 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
                 return draw_custom_header(f, area, &format!("ECS Voyager - Logs (Task: {})", task.task_id));
             }
             "ECS Voyager - Logs"
+        }
+        AppState::Metrics => {
+            if let Some(service) = &app.selected_service {
+                return draw_custom_header(f, area, &format!("ECS Voyager - Metrics (Service: {})", service));
+            }
+            "ECS Voyager - Metrics"
         }
     };
 
@@ -180,6 +187,7 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
             AppState::Tasks => format!("{} tasks", app.tasks.len()),
             AppState::Logs => format!("{} logs", app.logs.len()),
             AppState::Details => "details".to_string(),
+            AppState::Metrics => "metrics".to_string(),
         };
 
         let line2 = Line::from(vec![
@@ -556,6 +564,108 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(logs_widget, area);
 }
 
+/// Renders the metrics view showing CloudWatch metrics for a service.
+///
+/// Displays CPU and Memory utilization metrics with simple text-based statistics.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the metrics view
+/// * `app` - The application state containing metrics data
+fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
+
+    if app.metrics.is_none() {
+        let no_metrics = Paragraph::new("No metrics available for this service.\n\nThis could mean:\n- The service has no CloudWatch metrics enabled\n- The service hasn't been running long enough to generate metrics\n- There was an error fetching metrics")
+            .style(Style::default().fg(Color::Yellow))
+            .block(
+                Block::default()
+                    .title("Metrics (Press Esc or h to go back | r:refresh)")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false });
+        f.render_widget(no_metrics, area);
+        return;
+    }
+
+    let metrics = app.metrics.as_ref().unwrap();
+    let mut content_lines: Vec<Line> = vec![];
+
+    // CPU Metrics Section
+    content_lines.push(Line::from(vec![
+        Span::styled("CPU Utilization", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+    ]));
+    content_lines.push(Line::from(""));
+
+    if metrics.cpu_datapoints.is_empty() {
+        content_lines.push(Line::from(Span::styled("  No CPU data available", Style::default().fg(Color::Yellow))));
+    } else {
+        let avg_cpu: f64 = metrics.cpu_datapoints.iter()
+            .filter_map(|dp| dp.average)
+            .sum::<f64>() / metrics.cpu_datapoints.len() as f64;
+        let max_cpu = metrics.cpu_datapoints.iter()
+            .filter_map(|dp| dp.maximum)
+            .fold(0.0f64, |a, b| a.max(b));
+
+        content_lines.push(Line::from(vec![
+            Span::styled("  Average: ", Style::default().fg(Color::Gray)),
+            Span::styled(format!("{:.2}%", avg_cpu), Style::default().fg(Color::Green)),
+        ]));
+        content_lines.push(Line::from(vec![
+            Span::styled("  Maximum: ", Style::default().fg(Color::Gray)),
+            Span::styled(format!("{:.2}%", max_cpu), Style::default().fg(Color::Yellow)),
+        ]));
+        content_lines.push(Line::from(vec![
+            Span::styled("  Data points: ", Style::default().fg(Color::Gray)),
+            Span::styled(format!("{}", metrics.cpu_datapoints.len()), Style::default().fg(Color::White)),
+        ]));
+    }
+
+    content_lines.push(Line::from(""));
+    content_lines.push(Line::from(""));
+
+    // Memory Metrics Section
+    content_lines.push(Line::from(vec![
+        Span::styled("Memory Utilization", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+    ]));
+    content_lines.push(Line::from(""));
+
+    if metrics.memory_datapoints.is_empty() {
+        content_lines.push(Line::from(Span::styled("  No Memory data available", Style::default().fg(Color::Yellow))));
+    } else {
+        let avg_mem: f64 = metrics.memory_datapoints.iter()
+            .filter_map(|dp| dp.average)
+            .sum::<f64>() / metrics.memory_datapoints.len() as f64;
+        let max_mem = metrics.memory_datapoints.iter()
+            .filter_map(|dp| dp.maximum)
+            .fold(0.0f64, |a, b| a.max(b));
+
+        content_lines.push(Line::from(vec![
+            Span::styled("  Average: ", Style::default().fg(Color::Gray)),
+            Span::styled(format!("{:.2}%", avg_mem), Style::default().fg(Color::Green)),
+        ]));
+        content_lines.push(Line::from(vec![
+            Span::styled("  Maximum: ", Style::default().fg(Color::Gray)),
+            Span::styled(format!("{:.2}%", max_mem), Style::default().fg(Color::Yellow)),
+        ]));
+        content_lines.push(Line::from(vec![
+            Span::styled("  Data points: ", Style::default().fg(Color::Gray)),
+            Span::styled(format!("{}", metrics.memory_datapoints.len()), Style::default().fg(Color::White)),
+        ]));
+    }
+
+    let time_range = app.config.metrics.time_range_minutes;
+    let metrics_widget = Paragraph::new(content_lines)
+        .style(Style::default().fg(Color::White))
+        .block(
+            Block::default()
+                .title(format!("Metrics (Last {} min | r:refresh | Esc/h:back)", time_range))
+                .borders(Borders::ALL),
+        )
+        .wrap(Wrap { trim: false });
+
+    f.render_widget(metrics_widget, area);
+}
+
 /// Renders the help overlay showing all keyboard shortcuts.
 ///
 /// Displays a comprehensive list of keybindings organized by category:
@@ -626,6 +736,10 @@ fn draw_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  l           ", Style::default().fg(Color::Yellow)),
             Span::raw("View logs (from Tasks view)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  m           ", Style::default().fg(Color::Yellow)),
+            Span::raw("View metrics (from Services view)"),
         ]),
         Line::from(vec![
             Span::styled("  t           ", Style::default().fg(Color::Yellow)),
