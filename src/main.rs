@@ -134,6 +134,16 @@ async fn run_app<B: ratatui::backend::Backend>(
                             _ => {}
                         }
                     }
+                    // Handle log search mode input
+                    else if app.log_search_mode {
+                        match key.code {
+                            KeyCode::Char(c) => app.update_log_search(c),
+                            KeyCode::Backspace => app.delete_log_search_char(),
+                            KeyCode::Enter => app.exit_log_search_mode(),
+                            KeyCode::Esc => app.clear_log_search(),
+                            _ => {}
+                        }
+                    }
                     // Handle normal mode input
                     else {
                         match key.code {
@@ -141,12 +151,34 @@ async fn run_app<B: ratatui::backend::Backend>(
                             KeyCode::Char('P') => app.show_profile_selector(),
                             KeyCode::Char('R') => app.show_region_selector(),
                             KeyCode::Char('/') => {
-                                // Only enable search in list views
+                                // Enable search in list views or log search in logs view
                                 match app.state {
                                     AppState::Clusters | AppState::Services | AppState::Tasks => {
                                         app.enter_search_mode();
                                     }
+                                    AppState::Logs => {
+                                        app.enter_log_search_mode();
+                                    }
                                     _ => {}
+                                }
+                            }
+                            KeyCode::Char('f') => {
+                                // Filter logs by level in logs view
+                                if app.state == AppState::Logs {
+                                    app.cycle_log_level_filter();
+                                }
+                            }
+                            KeyCode::Char('e') => {
+                                // Export logs in logs view
+                                if app.state == AppState::Logs {
+                                    match app.export_logs() {
+                                        Ok(path) => {
+                                            app.status_message = format!("Logs exported to: {}", path);
+                                        }
+                                        Err(e) => {
+                                            app.status_message = format!("Export failed: {}", e);
+                                        }
+                                    }
                                 }
                             }
                             KeyCode::Char('?') => app.toggle_help(),

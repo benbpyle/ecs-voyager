@@ -101,6 +101,14 @@ pub struct App {
     /// Current search/filter query string
     pub search_query: String,
 
+    // Log filtering and search
+    /// Whether log search input mode is active
+    pub log_search_mode: bool,
+    /// Current log search query
+    pub log_search_query: String,
+    /// Current log level filter (None = show all)
+    pub log_level_filter: Option<LogLevel>,
+
     // Status
     /// Status message displayed to user
     pub status_message: String,
@@ -154,6 +162,39 @@ pub struct TaskInfo {
     pub memory: String,
 }
 
+/// Log level parsed from log message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Fatal,
+    Unknown,
+}
+
+impl LogLevel {
+    /// Parses log level from a message string.
+    ///
+    /// Looks for common log level indicators like [INFO], ERROR:, etc.
+    pub fn from_message(message: &str) -> Self {
+        let upper = message.to_uppercase();
+        if upper.contains("DEBUG") || upper.contains("[DBG]") {
+            LogLevel::Debug
+        } else if upper.contains("INFO") || upper.contains("[INF]") {
+            LogLevel::Info
+        } else if upper.contains("WARN") || upper.contains("[WRN]") {
+            LogLevel::Warn
+        } else if upper.contains("ERROR") || upper.contains("[ERR]") {
+            LogLevel::Error
+        } else if upper.contains("FATAL") || upper.contains("[FTL]") {
+            LogLevel::Fatal
+        } else {
+            LogLevel::Unknown
+        }
+    }
+}
+
 /// A single log entry from CloudWatch Logs.
 ///
 /// Represents one log line from a container with timestamp and metadata.
@@ -165,6 +206,21 @@ pub struct LogEntry {
     pub message: String,
     /// Name of the container that produced the log
     pub container_name: String,
+    /// Parsed log level
+    pub level: LogLevel,
+}
+
+impl LogEntry {
+    /// Creates a new log entry with parsed log level.
+    pub fn new(timestamp: i64, message: String, container_name: String) -> Self {
+        let level = LogLevel::from_message(&message);
+        Self {
+            timestamp,
+            message,
+            container_name,
+            level,
+        }
+    }
 }
 
 impl App {
@@ -252,6 +308,9 @@ impl App {
             auto_tail: true,
             search_mode: false,
             search_query: String::new(),
+            log_search_mode: false,
+            log_search_query: String::new(),
+            log_level_filter: None,
             status_message: "Loading clusters...".to_string(),
             loading: false,
             last_refresh: Instant::now(),
@@ -624,6 +683,155 @@ impl App {
             "Auto-tail {}",
             if self.auto_tail { "enabled" } else { "disabled" }
         );
+    }
+
+    /// Enters log search mode.
+    pub fn enter_log_search_mode(&mut self) {
+        self.log_search_mode = true;
+        self.log_search_query.clear();
+        self.status_message = "Log search: ".to_string();
+    }
+
+    /// Exits log search mode.
+    pub fn exit_log_search_mode(&mut self) {
+        self.log_search_mode = false;
+        let filtered_count = self.get_filtered_logs().len();
+        self.status_message = format!("Found {} logs matching '{}'", filtered_count, self.log_search_query);
+    }
+
+    /// Updates the log search query.
+    ///
+    /// Adds a character to the log search query for filtering displayed logs.
+    pub fn update_log_search(&mut self, c: char) {
+        self.log_search_query.push(c);
+    }
+
+    /// Deletes the last character from the log search query.
+    pub fn delete_log_search_char(&mut self) {
+        self.log_search_query.pop();
+    }
+
+    /// Clears the log search query.
+    pub fn clear_log_search(&mut self) {
+        self.log_search_mode = false;
+        self.log_search_query.clear();
+        self.status_message = "Log search cleared".to_string();
+    }
+
+    /// Cycles to the next log level filter.
+    ///
+    /// Cycles through: None -> Debug -> Info -> Warn -> Error -> Fatal -> None
+    pub fn cycle_log_level_filter(&mut self) {
+        self.log_level_filter = match self.log_level_filter {
+            None => Some(LogLevel::Debug),
+            Some(LogLevel::Debug) => Some(LogLevel::Info),
+            Some(LogLevel::Info) => Some(LogLevel::Warn),
+            Some(LogLevel::Warn) => Some(LogLevel::Error),
+            Some(LogLevel::Error) => Some(LogLevel::Fatal),
+            Some(LogLevel::Fatal) => None,
+            Some(LogLevel::Unknown) => None,
+        };
+
+        let filter_msg = match &self.log_level_filter {
+            None => "all levels".to_string(),
+            Some(level) => format!("{:?}", level),
+        };
+        self.status_message = format!("Log filter: {}", filter_msg);
+    }
+
+    /// Returns filtered logs based on search query and level filter.
+    ///
+    /// Applies both text search and log level filtering to the logs.
+    pub fn get_filtered_logs(&self) -> Vec<LogEntry> {
+        let mut filtered = self.logs.clone();
+
+        // Apply log level filter
+        if let Some(ref level) = self.log_level_filter {
+            filtered.retain(|log| &log.level == level);
+        }
+
+        // Apply search filter
+        if !self.log_search_query.is_empty() {
+            let query_lower = self.log_search_query.to_lowercase();
+            filtered.retain(|log| {
+                log.message.to_lowercase().contains(&query_lower)
+                    || log.container_name.to_lowercase().contains(&query_lower)
+            });
+        }
+
+        filtered
+    }
+
+    /// Exports logs to a file.
+    ///
+    /// Writes all current logs (including filtered) to a timestamped file.
+    ///
+    /// # Returns
+    /// Returns `Ok(filename)` with the created file path, or an error if file operations fail
+    pub fn export_logs(&self) -> Result<String> {
+        use std::fs;
+        use std::path::PathBuf;
+
+        // Expand tilde in export directory
+        let export_dir = self.config.logs.export_dir.replace('~',
+            &dirs::home_dir()
+                .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
+                .to_string_lossy()
+        );
+
+        // Create export directory if it doesn't exist
+        let export_path = PathBuf::from(&export_dir);
+        if !export_path.exists() {
+            fs::create_dir_all(&export_path)?;
+        }
+
+        // Generate filename with timestamp
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let task_id = self.selected_task.as_ref()
+            .map(|t| t.task_id.as_str())
+            .unwrap_or("unknown");
+        let filename = format!("ecs-logs-{}-{}.txt", task_id, timestamp);
+        let file_path = export_path.join(&filename);
+
+        // Get filtered logs
+        let logs = self.get_filtered_logs();
+
+        // Write logs to file
+        let mut content = String::new();
+        content.push_str(&format!("ECS Voyager Log Export\n"));
+        content.push_str(&format!("Exported: {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S")));
+        content.push_str(&format!("Task: {}\n", task_id));
+        content.push_str(&format!("Total logs: {}\n", logs.len()));
+        if let Some(ref filter) = self.log_level_filter {
+            content.push_str(&format!("Level filter: {:?}\n", filter));
+        }
+        if !self.log_search_query.is_empty() {
+            content.push_str(&format!("Search query: {}\n", self.log_search_query));
+        }
+        content.push_str(&format!("{}\n\n", "=".repeat(80)));
+
+        for log in logs {
+            let timestamp_str = if self.config.logs.show_timestamps {
+                let dt = chrono::DateTime::from_timestamp_millis(log.timestamp)
+                    .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S%.3f").to_string())
+                    .unwrap_or_else(|| log.timestamp.to_string());
+                format!("[{}] ", dt)
+            } else {
+                String::new()
+            };
+
+            content.push_str(&format!(
+                "{}[{:?}] [{}] {}\n",
+                timestamp_str,
+                log.level,
+                log.container_name,
+                log.message
+            ));
+        }
+
+        fs::write(&file_path, content)?;
+
+        Ok(file_path.to_string_lossy().to_string())
     }
 
     // Search methods
@@ -1157,16 +1365,8 @@ mod tests {
         let mut app = create_test_app();
         app.state = AppState::Logs;
         app.logs = vec![
-            LogEntry {
-                timestamp: 1000,
-                message: "log1".to_string(),
-                container_name: "container1".to_string(),
-            },
-            LogEntry {
-                timestamp: 2000,
-                message: "log2".to_string(),
-                container_name: "container1".to_string(),
-            },
+            LogEntry::new(1000, "log1".to_string(), "container1".to_string()),
+            LogEntry::new(2000, "log2".to_string(), "container1".to_string()),
         ];
         app.log_scroll = 0;
         app.auto_tail = true;
@@ -1254,11 +1454,7 @@ mod tests {
         let mut app = create_test_app();
         app.state = AppState::Logs;
         app.logs = vec![
-            LogEntry {
-                timestamp: 1000,
-                message: "test".to_string(),
-                container_name: "container1".to_string(),
-            },
+            LogEntry::new(1000, "test".to_string(), "container1".to_string()),
         ];
         app.log_scroll = 5;
         app.auto_tail = false;
@@ -1287,16 +1483,8 @@ mod tests {
         let mut app = create_test_app();
         app.auto_tail = false;
         app.logs = vec![
-            LogEntry {
-                timestamp: 1000,
-                message: "log1".to_string(),
-                container_name: "container1".to_string(),
-            },
-            LogEntry {
-                timestamp: 2000,
-                message: "log2".to_string(),
-                container_name: "container1".to_string(),
-            },
+            LogEntry::new(1000, "log1".to_string(), "container1".to_string()),
+            LogEntry::new(2000, "log2".to_string(), "container1".to_string()),
         ];
 
         app.toggle_auto_tail();
@@ -1585,11 +1773,7 @@ mod tests {
 
     #[test]
     fn test_log_entry_clone() {
-        let log = LogEntry {
-            timestamp: 12345,
-            message: "test message".to_string(),
-            container_name: "container1".to_string(),
-        };
+        let log = LogEntry::new(12345, "test message".to_string(), "container1".to_string());
 
         let cloned = log.clone();
         assert_eq!(log.timestamp, cloned.timestamp);

@@ -26,6 +26,14 @@ pub struct Config {
     /// UI and display configuration
     #[serde(default)]
     pub ui: UiConfig,
+
+    /// Logs configuration
+    #[serde(default)]
+    pub logs: LogsConfig,
+
+    /// Metrics configuration
+    #[serde(default)]
+    pub metrics: MetricsConfig,
 }
 
 /// AWS SDK configuration options.
@@ -65,6 +73,42 @@ pub struct UiConfig {
     pub theme: String,
 }
 
+/// Logs configuration options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogsConfig {
+    /// Enable log search highlighting
+    #[serde(default = "default_true")]
+    pub enable_search: bool,
+
+    /// Enable log level filtering (INFO, WARN, ERROR, etc.)
+    #[serde(default = "default_true")]
+    pub enable_filtering: bool,
+
+    /// Show timestamps in log view
+    #[serde(default = "default_true")]
+    pub show_timestamps: bool,
+
+    /// Default log export directory
+    #[serde(default = "default_export_dir")]
+    pub export_dir: String,
+}
+
+/// Metrics configuration options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricsConfig {
+    /// Enable CloudWatch metrics display
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+
+    /// Metrics time range in minutes
+    #[serde(default = "default_metrics_range")]
+    pub time_range_minutes: i32,
+
+    /// Metrics refresh interval in seconds
+    #[serde(default = "default_metrics_refresh")]
+    pub refresh_interval: u64,
+}
+
 // Default value functions for serde
 fn default_auto_refresh() -> bool {
     true
@@ -80,6 +124,22 @@ fn default_view() -> String {
 
 fn default_theme() -> String {
     "dark".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_export_dir() -> String {
+    "~/Downloads".to_string()
+}
+
+fn default_metrics_range() -> i32 {
+    60
+}
+
+fn default_metrics_refresh() -> u64 {
+    60
 }
 
 // Default trait implementations removed - using derive(Default) instead
@@ -98,6 +158,27 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             theme: default_theme(),
+        }
+    }
+}
+
+impl Default for LogsConfig {
+    fn default() -> Self {
+        Self {
+            enable_search: default_true(),
+            enable_filtering: default_true(),
+            show_timestamps: default_true(),
+            export_dir: default_export_dir(),
+        }
+    }
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_true(),
+            time_range_minutes: default_metrics_range(),
+            refresh_interval: default_metrics_refresh(),
         }
     }
 }
@@ -200,6 +281,29 @@ default_view = "clusters"
 # Color theme (for future use)
 # Options: "dark", "light"
 theme = "dark"
+
+[logs]
+# Enable log search highlighting
+enable_search = true
+
+# Enable log level filtering (INFO, WARN, ERROR, etc.)
+enable_filtering = true
+
+# Show timestamps in log view
+show_timestamps = true
+
+# Default directory for log exports
+export_dir = "~/Downloads"
+
+[metrics]
+# Enable CloudWatch metrics display
+enabled = true
+
+# Metrics time range in minutes
+time_range_minutes = 60
+
+# Metrics refresh interval in seconds
+refresh_interval = 60
 "#;
 
         fs::write(&config_path, default_toml)
