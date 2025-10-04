@@ -26,16 +26,20 @@ pub struct EcsClient {
 #[derive(Debug, Clone)]
 pub struct MetricDatapoint {
     /// Timestamp of the datapoint
+    #[allow(dead_code)]
     pub timestamp: i64,
     /// Average value
     pub average: Option<f64>,
     /// Maximum value
     pub maximum: Option<f64>,
     /// Minimum value
+    #[allow(dead_code)]
     pub minimum: Option<f64>,
     /// Sum of values
+    #[allow(dead_code)]
     pub sum: Option<f64>,
     /// Sample count
+    #[allow(dead_code)]
     pub sample_count: Option<f64>,
 }
 
@@ -851,9 +855,11 @@ mod tests {
 
     #[test]
     fn test_log_entries_sorting() {
-        let mut logs = [LogEntry::new(3000, "third".to_string(), "web".to_string()),
+        let mut logs = [
+            LogEntry::new(3000, "third".to_string(), "web".to_string()),
             LogEntry::new(1000, "first".to_string(), "web".to_string()),
-            LogEntry::new(2000, "second".to_string(), "web".to_string())];
+            LogEntry::new(2000, "second".to_string(), "web".to_string()),
+        ];
 
         logs.sort_by_key(|log| log.timestamp);
 
@@ -867,8 +873,10 @@ mod tests {
 
     #[test]
     fn test_log_entries_with_same_timestamp() {
-        let mut logs = [LogEntry::new(1000, "log A".to_string(), "container1".to_string()),
-            LogEntry::new(1000, "log B".to_string(), "container2".to_string())];
+        let mut logs = [
+            LogEntry::new(1000, "log A".to_string(), "container1".to_string()),
+            LogEntry::new(1000, "log B".to_string(), "container2".to_string()),
+        ];
 
         logs.sort_by_key(|log| log.timestamp);
 
@@ -938,9 +946,8 @@ mod tests {
         let task_arn = "arn:aws:ecs:region:account:task/task-id";
         let status = "RUNNING";
 
-        let description = format!(
-            "Cluster: {cluster}\n\nTask ARN: {task_arn}\nLast Status: {status}\n"
-        );
+        let description =
+            format!("Cluster: {cluster}\n\nTask ARN: {task_arn}\nLast Status: {status}\n");
 
         assert!(description.contains("Cluster: my-cluster"));
         assert!(description.contains("Task ARN: arn:aws:ecs"));
@@ -979,9 +986,11 @@ mod tests {
     // Test multi-container scenario
     #[test]
     fn test_multiple_container_logs() {
-        let logs = [LogEntry::new(1000, "Web server started".to_string(), "web".to_string()),
+        let logs = [
+            LogEntry::new(1000, "Web server started".to_string(), "web".to_string()),
             LogEntry::new(2000, "Database connected".to_string(), "db".to_string()),
-            LogEntry::new(3000, "Cache initialized".to_string(), "redis".to_string())];
+            LogEntry::new(3000, "Cache initialized".to_string(), "redis".to_string()),
+        ];
 
         assert_eq!(logs.len(), 3);
         assert_eq!(logs[0].container_name, "web");

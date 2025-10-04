@@ -724,17 +724,11 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
 
         content_lines.push(Line::from(vec![
             Span::styled("  Average: ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                format!("{avg_cpu:.2}%"),
-                Style::default().fg(Color::Green),
-            ),
+            Span::styled(format!("{avg_cpu:.2}%"), Style::default().fg(Color::Green)),
         ]));
         content_lines.push(Line::from(vec![
             Span::styled("  Maximum: ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                format!("{max_cpu:.2}%"),
-                Style::default().fg(Color::Yellow),
-            ),
+            Span::styled(format!("{max_cpu:.2}%"), Style::default().fg(Color::Yellow)),
         ]));
         content_lines.push(Line::from(vec![
             Span::styled("  Data points: ", Style::default().fg(Color::Gray)),
@@ -777,17 +771,11 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
 
         content_lines.push(Line::from(vec![
             Span::styled("  Average: ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                format!("{avg_mem:.2}%"),
-                Style::default().fg(Color::Green),
-            ),
+            Span::styled(format!("{avg_mem:.2}%"), Style::default().fg(Color::Green)),
         ]));
         content_lines.push(Line::from(vec![
             Span::styled("  Maximum: ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                format!("{max_mem:.2}%"),
-                Style::default().fg(Color::Yellow),
-            ),
+            Span::styled(format!("{max_mem:.2}%"), Style::default().fg(Color::Yellow)),
         ]));
         content_lines.push(Line::from(vec![
             Span::styled("  Data points: ", Style::default().fg(Color::Gray)),
