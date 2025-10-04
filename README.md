@@ -26,15 +26,44 @@ A terminal user interface (TUI) for exploring and managing AWS ECS resources, in
 
 ## Installation
 
-### Prerequisites
+### Homebrew (macOS)
 
-- Rust 1.70+ ([Install Rust](https://rustup.rs/))
-- Valid AWS credentials configured (AWS CLI not required - uses AWS SDK directly)
+The easiest way to install on macOS:
+
+```bash
+# Tap the repository and install
+brew tap benbpyle/ecs-voyager https://github.com/benbpyle/ecs-voyager
+brew install ecs-voyager
+```
+
+To upgrade to the latest version:
+
+```bash
+brew upgrade ecs-voyager
+```
+
+Alternatively, install directly without tapping:
+
+```bash
+brew install benbpyle/ecs-voyager/ecs-voyager
+```
+
+### Cargo (All Platforms)
+
+If you have Rust installed:
+
+```bash
+cargo install --git https://github.com/benbpyle/ecs-voyager.git
+```
 
 ### Build from Source
 
+Requirements:
+- Rust 1.70+ ([Install Rust](https://rustup.rs/))
+- Valid AWS credentials configured (AWS CLI not required - uses AWS SDK directly)
+
 ```bash
-git clone https://github.com/yourusername/ecs-voyager.git
+git clone https://github.com/benbpyle/ecs-voyager.git
 cd ecs-voyager
 cargo build --release
 ```

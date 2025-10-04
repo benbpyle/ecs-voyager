@@ -40,6 +40,13 @@ use std::io;
 /// - Terminal restoration fails on cleanup
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Handle --version flag
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && (args[1] == "--version" || args[1] == "-V") {
+        println!("ecs-voyager {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // Load configuration
     let config = Config::load()?;
 
