@@ -11,6 +11,7 @@ mod config;
 
 use anyhow::Result;
 use app::{App, AppState};
+use config::Config;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -39,6 +40,9 @@ use std::io;
 /// - Terminal restoration fails on cleanup
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load configuration
+    let config = Config::load()?;
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -46,8 +50,8 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app
-    let mut app = App::new().await?;
+    // Create app with configuration
+    let mut app = App::new(config).await?;
 
     // Run app
     let res = run_app(&mut terminal, &mut app).await;

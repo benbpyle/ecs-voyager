@@ -1,3 +1,9 @@
+//! Terminal user interface rendering module.
+//!
+//! This module contains all UI rendering logic using the ratatui framework.
+//! It defines functions for drawing different views (clusters, services, tasks, logs)
+//! and UI components (header, footer, overlays).
+
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect, Alignment},
     style::{Color, Modifier, Style},
@@ -10,6 +16,14 @@ use chrono::{DateTime, Local};
 
 use crate::app::{App, AppState};
 
+/// Main rendering function that draws the entire UI.
+///
+/// Divides the terminal into three sections (header, content, footer) and delegates
+/// rendering to specialized functions based on the current application state.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `app` - The application state containing data to display
 pub fn draw(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -47,6 +61,15 @@ pub fn draw(f: &mut Frame, app: &App) {
     }
 }
 
+/// Renders the header section showing the current view and context.
+///
+/// Displays a title that changes based on the current state, including selected
+/// cluster, service, and task information when applicable.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the header
+/// * `app` - The application state
 fn draw_header(f: &mut Frame, area: Rect, app: &App) {
     let title = match app.state {
         AppState::Clusters => "ECS Voyager - Clusters",
@@ -74,6 +97,14 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
     draw_custom_header(f, area, title);
 }
 
+/// Renders a header with a custom title string.
+///
+/// Helper function that creates a styled paragraph for the header.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the header
+/// * `title` - The title text to display
 fn draw_custom_header(f: &mut Frame, area: Rect, title: &str) {
     let header = Paragraph::new(title)
         .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
@@ -81,6 +112,15 @@ fn draw_custom_header(f: &mut Frame, area: Rect, title: &str) {
     f.render_widget(header, area);
 }
 
+/// Renders the footer section with keybindings and status information.
+///
+/// Shows available keyboard shortcuts and the current status message. When loading,
+/// displays a spinner animation. If search is active, shows the search query.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the footer
+/// * `app` - The application state
 fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     let footer_text = if app.show_help {
         vec![
@@ -133,6 +173,15 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(footer, area);
 }
 
+/// Renders the clusters list view.
+///
+/// Displays all ECS clusters (filtered by search query if active) as a vertical list.
+/// The currently selected cluster is highlighted. Shows count of filtered vs total clusters.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the clusters list
+/// * `app` - The application state containing cluster data
 fn draw_clusters(f: &mut Frame, area: Rect, app: &App) {
     let filtered_clusters = app.get_filtered_clusters();
 
@@ -169,6 +218,16 @@ fn draw_clusters(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(list, area);
 }
 
+/// Renders the services table view.
+///
+/// Displays services for the selected cluster in a table format with columns for name,
+/// status, desired/running/pending counts, and launch type. The currently selected
+/// service row is highlighted. Shows available actions in the title.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the services table
+/// * `app` - The application state containing service data
 fn draw_services(f: &mut Frame, area: Rect, app: &App) {
     let filtered_services = app.get_filtered_services();
 
@@ -228,6 +287,16 @@ fn draw_services(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(table, area);
 }
 
+/// Renders the tasks table view.
+///
+/// Displays tasks for the selected service in a table format with columns for task ID,
+/// status, desired status, container instance, CPU, and memory. The currently selected
+/// task row is highlighted. Shows available actions in the title.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the tasks table
+/// * `app` - The application state containing task data
 fn draw_tasks(f: &mut Frame, area: Rect, app: &App) {
     let filtered_tasks = app.get_filtered_tasks();
 
@@ -287,6 +356,15 @@ fn draw_tasks(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(table, area);
 }
 
+/// Renders the details view showing comprehensive information about a resource.
+///
+/// Displays detailed information about a selected service or task in a scrollable
+/// text view. The content is formatted as multi-line text with word wrapping.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the details view
+/// * `app` - The application state containing details text
 fn draw_details(f: &mut Frame, area: Rect, app: &App) {
     let default_text = "No details available".to_string();
     let content = app.details.as_ref().unwrap_or(&default_text);
@@ -303,6 +381,18 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, area);
 }
 
+/// Renders the logs view showing CloudWatch Logs for a task.
+///
+/// Displays log entries with timestamps, container names, and messages. Supports scrolling
+/// and auto-tail mode. Shows a scroll indicator with current position. Each log line is
+/// color-coded: timestamps in dark gray, container names in cyan, messages in white.
+///
+/// When no logs are available, displays a helpful message explaining possible reasons.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the logs view
+/// * `app` - The application state containing log entries
 fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     if app.logs.is_empty() {
         let no_logs = Paragraph::new("No logs available for this task.\n\nThis could mean:\n- The task has no CloudWatch Logs configured\n- The log stream hasn't been created yet\n- The task hasn't produced any logs")
@@ -383,6 +473,15 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(logs_widget, area);
 }
 
+/// Renders the help overlay showing all keyboard shortcuts.
+///
+/// Displays a comprehensive list of keybindings organized by category:
+/// Navigation, Views, Actions, and General. Each keybinding is shown with
+/// a description of its function.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the help screen
 fn draw_help(f: &mut Frame, area: Rect) {
     let help_text = vec![
         Line::from(""),
@@ -473,6 +572,14 @@ fn draw_help(f: &mut Frame, area: Rect) {
     f.render_widget(help, area);
 }
 
+/// Renders a centered loading overlay with a spinner and status message.
+///
+/// Displays a modal dialog box in the center of the screen with an animated spinner
+/// and the current loading status message. Used to indicate background operations.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `app` - The application state containing the status message
 fn draw_loading_overlay(f: &mut Frame, app: &App) {
     // Create a centered overlay
     let area = f.area();
@@ -523,6 +630,14 @@ fn draw_loading_overlay(f: &mut Frame, app: &App) {
     f.render_widget(loading_block, overlay_area);
 }
 
+/// Renders the search input overlay.
+///
+/// Displays a modal dialog box near the bottom of the screen where users can type
+/// their search query. Shows the current query text or an underscore cursor when empty.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `app` - The application state containing the search query
 fn draw_search_input(f: &mut Frame, app: &App) {
     let area = f.area();
     let width = 60.min(area.width.saturating_sub(4));
@@ -557,6 +672,13 @@ fn draw_search_input(f: &mut Frame, app: &App) {
     f.render_widget(search_widget, search_area);
 }
 
+/// Returns the current frame of a spinner animation based on system time.
+///
+/// Uses a 10-frame Braille pattern spinner that updates approximately every 80ms.
+/// Provides visual feedback for loading states.
+///
+/// # Returns
+/// A static string reference containing the current spinner frame character
 fn get_spinner() -> &'static str {
     // Get current time in milliseconds and cycle through spinner frames
     let now = SystemTime::now()
