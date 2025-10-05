@@ -125,6 +125,6 @@ jobs:
           # Create PR
           gh pr create \
             --title "chore: update Homebrew formula to ${VERSION}" \
-            --body 'Auto-generated PR to update Homebrew formula' \
+            --body "Auto-generated PR to update Homebrew formula" \
             --base master \
             --head "${BRANCH_NAME}"
