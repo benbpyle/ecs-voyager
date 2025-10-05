@@ -116,5 +116,6 @@ jobs:
                      -m "- ARM64 SHA256: ${AARCH64_SHA256}" \
                      -m "- x86_64 SHA256: ${X86_64_SHA256}"
 
-          # Push to master (requires bypass in branch protection)
+          # Pull latest changes and push
+          git pull --rebase origin master
           git push origin HEAD:master
