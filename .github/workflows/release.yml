@@ -62,8 +62,11 @@ jobs:
     needs: build-and-release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout tap repository
         uses: actions/checkout@v4
+        with:
+          repository: benbpyle/homebrew-ecs-voyager
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download release artifacts
         run: |
@@ -126,7 +129,7 @@ jobs:
 
           # Create PR
           gh pr create \
-            --title "chore: update Homebrew formula to ${VERSION}" \
-            --body "Auto-generated PR to update Homebrew formula" \
-            --base master \
+            --title "chore: update formula to ${VERSION}" \
+            --body "Auto-generated PR to update formula" \
+            --base main \
             --head "${BRANCH_NAME}"
