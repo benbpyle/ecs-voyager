@@ -276,7 +276,7 @@ impl EcsClient {
     /// - The AWS DescribeServices API call fails
     /// - The service doesn't exist in the specified cluster
     /// - Insufficient permissions to describe the service
-    pub async fn describe_service(&self, cluster: &str, service: &str) -> Result<String> {
+    pub async fn describe_service(&self, cluster: &str, service: &str) -> Result<(String, String)> {
         let resp = self
             .client
             .describe_services()
@@ -289,7 +289,10 @@ impl EcsClient {
         let mut output = String::new();
         output.push_str(&format!("Cluster: {cluster}\n\n"));
 
+        let mut json_parts = Vec::new();
+
         for svc in resp.services() {
+            // Formatted text view
             output.push_str(&format!(
                 "Service Name: {}\n",
                 svc.service_name().unwrap_or("N/A")
@@ -310,10 +313,58 @@ impl EcsClient {
                 "Task Definition: {}\n",
                 svc.task_definition().unwrap_or("N/A")
             ));
+
+            // Add deployment info
+            let deployments = svc.deployments();
+            if !deployments.is_empty() {
+                output.push_str("\nDeployments:\n");
+                for deployment in deployments {
+                    output.push_str(&format!("  - Status: {}\n", deployment.status().unwrap_or("N/A")));
+                    output.push_str(&format!("    Running Count: {}\n", deployment.running_count()));
+                    output.push_str(&format!("    Desired Count: {}\n", deployment.desired_count()));
+                }
+            }
+
+            // Add network configuration
+            if let Some(network_config) = svc.network_configuration() {
+                output.push_str("\nNetwork Configuration:\n");
+                if let Some(awsvpc) = network_config.awsvpc_configuration() {
+                    output.push_str(&format!("  Subnets: {}\n", awsvpc.subnets().join(", ")));
+                    output.push_str(&format!("  Assign Public IP: {}\n",
+                        awsvpc.assign_public_ip().map(|ip| ip.as_str()).unwrap_or("N/A")));
+                    let sgs = awsvpc.security_groups();
+                    if !sgs.is_empty() {
+                        output.push_str(&format!("  Security Groups: {}\n", sgs.join(", ")));
+                    }
+                }
+            }
+
             output.push('\n');
+
+            // Build JSON representation
+            json_parts.push(format!(r#"{{
+  "serviceName": "{}",
+  "serviceArn": "{}",
+  "status": "{}",
+  "desiredCount": {},
+  "runningCount": {},
+  "pendingCount": {},
+  "launchType": "{}",
+  "taskDefinition": "{}"
+}}"#,
+                svc.service_name().unwrap_or("N/A"),
+                svc.service_arn().unwrap_or("N/A"),
+                svc.status().unwrap_or("N/A"),
+                svc.desired_count(),
+                svc.running_count(),
+                svc.pending_count(),
+                svc.launch_type().map(|lt| lt.as_str()).unwrap_or("N/A"),
+                svc.task_definition().unwrap_or("N/A")
+            ));
         }
 
-        Ok(output)
+        let json_output = format!("[{}]", json_parts.join(",\n"));
+        Ok((output, json_output))
     }
 
     /// Retrieves detailed information about a specific task.
@@ -334,7 +385,7 @@ impl EcsClient {
     /// - The AWS DescribeTasks API call fails
     /// - The task doesn't exist in the specified cluster
     /// - Insufficient permissions to describe the task
-    pub async fn describe_task(&self, cluster: &str, task_arn: &str) -> Result<String> {
+    pub async fn describe_task(&self, cluster: &str, task_arn: &str) -> Result<(String, String)> {
         let resp = self
             .client
             .describe_tasks()
@@ -346,6 +397,8 @@ impl EcsClient {
         // Format the response manually since AWS types don't implement Serialize
         let mut output = String::new();
         output.push_str(&format!("Cluster: {cluster}\n\n"));
+
+        let mut json_parts = Vec::new();
 
         for task in resp.tasks() {
             output.push_str(&format!("Task ARN: {}\n", task.task_arn().unwrap_or("N/A")));
@@ -369,6 +422,7 @@ impl EcsClient {
             ));
 
             output.push_str("\nContainers:\n");
+            let mut container_jsons = Vec::new();
             for container in task.containers() {
                 output.push_str(&format!(
                     "  - Name: {}\n",
@@ -385,11 +439,47 @@ impl EcsClient {
                 if let Some(exit_code) = container.exit_code() {
                     output.push_str(&format!("    Exit Code: {exit_code}\n"));
                 }
+
+                // Build container JSON
+                let exit_code_json = container.exit_code().map(|ec| format!(r#", "exitCode": {ec}"#)).unwrap_or_default();
+                container_jsons.push(format!(r#"{{
+      "name": "{}",
+      "image": "{}",
+      "lastStatus": "{}"{exit_code_json}
+    }}"#,
+                    container.name().unwrap_or("N/A"),
+                    container.image().unwrap_or("N/A"),
+                    container.last_status().unwrap_or("N/A")
+                ));
             }
             output.push('\n');
+
+            // Build task JSON
+            json_parts.push(format!(r#"{{
+  "taskArn": "{}",
+  "taskDefinitionArn": "{}",
+  "lastStatus": "{}",
+  "desiredStatus": "{}",
+  "cpu": "{}",
+  "memory": "{}",
+  "launchType": "{}",
+  "containers": [
+{}
+  ]
+}}"#,
+                task.task_arn().unwrap_or("N/A"),
+                task.task_definition_arn().unwrap_or("N/A"),
+                task.last_status().unwrap_or("N/A"),
+                task.desired_status().unwrap_or("N/A"),
+                task.cpu().unwrap_or("N/A"),
+                task.memory().unwrap_or("N/A"),
+                task.launch_type().map(|lt| lt.as_str()).unwrap_or("N/A"),
+                container_jsons.join(",\n")
+            ));
         }
 
-        Ok(output)
+        let json_output = format!("[{}]", json_parts.join(",\n"));
+        Ok((output, json_output))
     }
 
     /// Forces a new deployment of a service, restarting all tasks.

@@ -198,6 +198,12 @@ async fn run_app<B: ratatui::backend::Backend>(
                             KeyCode::Char('l') => app.view_logs().await?,
                             KeyCode::Char('m') => app.view_metrics().await?,
                             KeyCode::Char('t') => app.toggle_auto_tail(),
+                            KeyCode::Char('J') => {
+                                // Toggle JSON view in Details
+                                if app.state == AppState::Details {
+                                    app.toggle_json_view();
+                                }
+                            }
                             KeyCode::Char('x') => app.execute_action().await?,
                             _ => {}
                         }

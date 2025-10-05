@@ -544,13 +544,21 @@ fn draw_tasks(f: &mut Frame, area: Rect, app: &App) {
 /// * `app` - The application state containing details text and scroll position
 fn draw_details(f: &mut Frame, area: Rect, app: &App) {
     let default_text = "No details available".to_string();
-    let content = app.details.as_ref().unwrap_or(&default_text);
+
+    // Choose between formatted view and JSON view
+    let (content, view_type) = if app.show_json_view {
+        (app.details_json.as_ref().unwrap_or(&default_text), "JSON")
+    } else {
+        (app.details.as_ref().unwrap_or(&default_text), "Formatted")
+    };
+
+    let title = format!("Details - {} View (↑↓:scroll | J:toggle | Esc/h:back)", view_type);
 
     let paragraph = Paragraph::new(content.as_str())
         .style(Style::default().fg(Color::White))
         .block(
             Block::default()
-                .title("Details (↑↓:scroll | Esc/h:back)")
+                .title(title)
                 .borders(Borders::ALL),
         )
         .wrap(Wrap { trim: false })
@@ -876,6 +884,10 @@ fn draw_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  d           ", Style::default().fg(Color::Yellow)),
             Span::raw("Describe selected item"),
+        ]),
+        Line::from(vec![
+            Span::styled("  J           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Toggle JSON view (in Details view)"),
         ]),
         Line::from(vec![
             Span::styled("  l           ", Style::default().fg(Color::Yellow)),

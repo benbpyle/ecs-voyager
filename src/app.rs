@@ -88,6 +88,10 @@ pub struct App {
     pub selected_task: Option<TaskInfo>,
     /// Detailed description text for resources
     pub details: Option<String>,
+    /// Full JSON representation of the resource
+    pub details_json: Option<String>,
+    /// Whether to show JSON view instead of formatted view
+    pub show_json_view: bool,
     /// Current scroll position in details view (line number)
     pub details_scroll: usize,
     /// Log entries for selected task
@@ -311,6 +315,8 @@ impl App {
             selected_service: None,
             selected_task: None,
             details: None,
+            details_json: None,
+            show_json_view: false,
             details_scroll: 0,
             logs: Vec::new(),
             log_scroll: 0,
@@ -334,6 +340,11 @@ impl App {
 
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
+    }
+
+    pub fn toggle_json_view(&mut self) {
+        self.show_json_view = !self.show_json_view;
+        self.details_scroll = 0; // Reset scroll when toggling views
     }
 
     pub fn set_view(&mut self, state: AppState) {
@@ -441,14 +452,14 @@ impl App {
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
                         self.status_message = "Loading task details...".to_string();
-                        self.details = Some(
-                            self.ecs_client
-                                .describe_task(cluster, &task.task_arn)
-                                .await?,
-                        );
+                        let (formatted, json) = self.ecs_client
+                            .describe_task(cluster, &task.task_arn)
+                            .await?;
+                        self.details = Some(formatted);
+                        self.details_json = Some(json);
                         self.loading = false;
                         self.set_view(AppState::Details);
-                        self.status_message = "Task details loaded".to_string();
+                        self.status_message = "Task details loaded (Press 'J' for JSON view)".to_string();
                     }
                 }
             }
@@ -600,14 +611,14 @@ impl App {
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
                         self.status_message = format!("Describing service: {}", service.name);
-                        self.details = Some(
-                            self.ecs_client
-                                .describe_service(cluster, &service.name)
-                                .await?,
-                        );
+                        let (formatted, json) = self.ecs_client
+                            .describe_service(cluster, &service.name)
+                            .await?;
+                        self.details = Some(formatted);
+                        self.details_json = Some(json);
                         self.loading = false;
                         self.set_view(AppState::Details);
-                        self.status_message = "Service details loaded".to_string();
+                        self.status_message = "Service details loaded (Press 'j' for JSON view)".to_string();
                     }
                 }
             }
@@ -616,14 +627,14 @@ impl App {
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
                         self.status_message = "Describing task...".to_string();
-                        self.details = Some(
-                            self.ecs_client
-                                .describe_task(cluster, &task.task_arn)
-                                .await?,
-                        );
+                        let (formatted, json) = self.ecs_client
+                            .describe_task(cluster, &task.task_arn)
+                            .await?;
+                        self.details = Some(formatted);
+                        self.details_json = Some(json);
                         self.loading = false;
                         self.set_view(AppState::Details);
-                        self.status_message = "Task details loaded".to_string();
+                        self.status_message = "Task details loaded (Press 'j' for JSON view)".to_string();
                     }
                 }
             }
@@ -1325,6 +1336,8 @@ mod tests {
             selected_service: None,
             selected_task: None,
             details: None,
+            details_json: None,
+            show_json_view: false,
             details_scroll: 0,
             logs: vec![],
             log_scroll: 0,
