@@ -28,11 +28,11 @@ jobs:
       - name: Check if should skip
         id: check_skip
         run: |
-          # Skip if commit is from github-actions bot (formula updates)
-          AUTHOR=$(git log -1 --pretty=format:'%an')
-          if [[ "$AUTHOR" == "github-actions[bot]" ]]; then
+          # Skip if commit message is a formula update (starts with "chore: update Homebrew formula")
+          COMMIT_MSG=$(git log -1 --pretty=format:'%s')
+          if [[ "$COMMIT_MSG" == "chore: update Homebrew formula"* ]]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Skipping release - commit from github-actions bot"
+            echo "Skipping release - formula update commit"
             exit 0
           fi
 
