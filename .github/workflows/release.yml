@@ -86,8 +86,9 @@ jobs:
           # Update version
           sed -i "s/version \".*\"/version \"${VERSION#v}\"/" Formula/ecs-voyager.rb
 
-          # Update URLs with new version
-          sed -i "s|download/v[0-9]\+\.[0-9]\+\.[0-9]\+/|download/${VERSION}/|g" Formula/ecs-voyager.rb
+          # Update URLs - both the path and the filename
+          sed -i "s|ecs-voyager-v[0-9]\+\.[0-9]\+\.[0-9]\+-aarch64-apple-darwin.tar.gz|ecs-voyager-${VERSION}-aarch64-apple-darwin.tar.gz|g" Formula/ecs-voyager.rb
+          sed -i "s|ecs-voyager-v[0-9]\+\.[0-9]\+\.[0-9]\+-x86_64-apple-darwin.tar.gz|ecs-voyager-${VERSION}-x86_64-apple-darwin.tar.gz|g" Formula/ecs-voyager.rb
 
           # Update ARM64 SHA256 (find the sha256 line after aarch64-apple-darwin)
           sed -i "/aarch64-apple-darwin.tar.gz/,/sha256/ s/sha256 \".*\"/sha256 \"${AARCH64_SHA256}\"/" Formula/ecs-voyager.rb
