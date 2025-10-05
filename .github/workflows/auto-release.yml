@@ -25,19 +25,28 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Check if tag already exists
-        id: check_tag
+      - name: Check if should skip
+        id: check_skip
         run: |
+          # Skip if commit is from github-actions bot (formula updates)
+          AUTHOR=$(git log -1 --pretty=format:'%an')
+          if [[ "$AUTHOR" == "github-actions[bot]" ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Skipping release - commit from github-actions bot"
+            exit 0
+          fi
+
+          # Skip if tag already exists
           if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "skip=true" >> $GITHUB_OUTPUT
             echo "Tag v${{ steps.version.outputs.version }} already exists, skipping release"
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "skip=false" >> $GITHUB_OUTPUT
             echo "Tag v${{ steps.version.outputs.version }} does not exist, will create release"
           fi
 
       - name: Create and push tag
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.check_skip.outputs.skip == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
