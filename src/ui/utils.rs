@@ -497,7 +497,7 @@ mod tests {
 
         // Widths should sum to approximately 100 (may have rounding differences)
         let total = left.width + center.width + right.width;
-        assert!(total >= 99 && total <= 100);
+        assert!((99..=100).contains(&total));
     }
 
     #[test]
