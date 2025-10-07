@@ -125,7 +125,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: benbpyle/homebrew-ecs-voyager
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - name: Download release artifacts
         run: |
@@ -160,7 +160,7 @@ jobs:
 
       - name: Create PR with updated formula
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
