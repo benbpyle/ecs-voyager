@@ -278,7 +278,6 @@ mod tests {
         assert!(sampled.iter().all(|&v| v == 0.0));
     }
 
-
     #[test]
     fn test_render_chart_empty_datapoints() {
         let datapoints: Vec<ChartDatapoint> = vec![];
