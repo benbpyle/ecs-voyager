@@ -15,6 +15,7 @@ use ratatui::{
 use std::time::SystemTime;
 
 use crate::app::{App, AppState, ModalState};
+use crate::charts::{render_chart, ChartConfig, ChartDatapoint};
 
 /// Main rendering function that draws the entire UI.
 ///
@@ -680,7 +681,8 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 
 /// Renders the metrics view showing CloudWatch metrics for a service.
 ///
-/// Displays CPU and Memory utilization metrics with simple text-based statistics.
+/// Displays CPU and Memory utilization metrics with ASCII charts, statistics,
+/// and CloudWatch alarm status.
 ///
 /// # Arguments
 /// * `f` - The ratatui Frame to render into
@@ -688,11 +690,11 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 /// * `app` - The application state containing metrics data
 fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
     if app.metrics.is_none() {
-        let no_metrics = Paragraph::new("No metrics available for this service.\n\nThis could mean:\n- The service has no CloudWatch metrics enabled\n- The service hasn't been running long enough to generate metrics\n- There was an error fetching metrics")
+        let no_metrics = Paragraph::new("No metrics available for this service.\n\nThis could mean:\n- The service has no CloudWatch metrics enabled\n- The service hasn't been running long enough to generate metrics\n- There was an error fetching metrics\n\nPress 'm' from Services view to load metrics")
             .style(Style::default().fg(Color::Yellow))
             .block(
                 Block::default()
-                    .title("Metrics (Press Esc or h to go back | r:refresh)")
+                    .title("Metrics (Press Esc or h to go back)")
                     .borders(Borders::ALL),
             )
             .wrap(Wrap { trim: false });
@@ -701,29 +703,92 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
     }
 
     let metrics = app.metrics.as_ref().unwrap();
+
+    // Split area into alarms section and charts section
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(if metrics.alarms.is_empty() { 0 } else { 8 }),
+            Constraint::Min(0),
+        ])
+        .split(area);
+
+    // Draw alarms section if alarms exist and config allows
+    if !metrics.alarms.is_empty() && app.config.metrics.show_alarms {
+        draw_alarms_section(f, chunks[0], metrics);
+    }
+
+    // Use appropriate chunk for metrics content
+    let metrics_area = if metrics.alarms.is_empty() || !app.config.metrics.show_alarms {
+        area
+    } else {
+        chunks[1]
+    };
+
     let mut content_lines: Vec<Line> = vec![];
 
-    // CPU Metrics Section
-    content_lines.push(Line::from(vec![Span::styled(
-        "CPU Utilization",
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    )]));
+    // Service and time range info
+    content_lines.push(Line::from(vec![
+        Span::styled("Service: ", Style::default().fg(Color::Gray)),
+        Span::styled(
+            &metrics.service_name,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" | Cluster: ", Style::default().fg(Color::Gray)),
+        Span::styled(
+            &metrics.cluster_name,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
     content_lines.push(Line::from(""));
 
-    if metrics.cpu_datapoints.is_empty() {
-        content_lines.push(Line::from(Span::styled(
-            "  No CPU data available",
-            Style::default().fg(Color::Yellow),
-        )));
+    // CPU Metrics Section
+    if app.config.metrics.show_charts && !metrics.cpu_datapoints.is_empty() {
+        // Render CPU chart
+        let cpu_chart_datapoints: Vec<ChartDatapoint> = metrics
+            .cpu_datapoints
+            .iter()
+            .filter_map(|dp| dp.average.map(|avg| ChartDatapoint {
+                timestamp: dp.timestamp,
+                value: avg,
+            }))
+            .collect();
+
+        let chart_config = ChartConfig {
+            width: 60,
+            height: 10,
+            min_value: None,  // Auto-scale based on data
+            max_value: None,  // Auto-scale based on data
+            line_color: Color::Green,
+            show_y_labels: true,
+        };
+
+        let chart_lines = render_chart(&cpu_chart_datapoints, &chart_config, "CPU Utilization (%)");
+        content_lines.extend(chart_lines);
+        content_lines.push(Line::from(""));
     } else {
+        // Fallback to text-based metrics
+        content_lines.push(Line::from(vec![Span::styled(
+            "  CPU Utilization",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        content_lines.push(Line::from(""));
+    }
+
+    // CPU Statistics
+    if !metrics.cpu_datapoints.is_empty() {
         let avg_cpu: f64 = metrics
             .cpu_datapoints
             .iter()
             .filter_map(|dp| dp.average)
             .sum::<f64>()
-            / metrics.cpu_datapoints.len() as f64;
+            / metrics.cpu_datapoints.iter().filter(|dp| dp.average.is_some()).count() as f64;
         let max_cpu = metrics
             .cpu_datapoints
             .iter()
@@ -733,44 +798,80 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
         content_lines.push(Line::from(vec![
             Span::styled("  Average: ", Style::default().fg(Color::Gray)),
             Span::styled(format!("{avg_cpu:.2}%"), Style::default().fg(Color::Green)),
-        ]));
-        content_lines.push(Line::from(vec![
-            Span::styled("  Maximum: ", Style::default().fg(Color::Gray)),
+            Span::styled("  |  Maximum: ", Style::default().fg(Color::Gray)),
             Span::styled(format!("{max_cpu:.2}%"), Style::default().fg(Color::Yellow)),
-        ]));
-        content_lines.push(Line::from(vec![
-            Span::styled("  Data points: ", Style::default().fg(Color::Gray)),
+            Span::styled("  |  Data points: ", Style::default().fg(Color::Gray)),
             Span::styled(
                 format!("{}", metrics.cpu_datapoints.len()),
                 Style::default().fg(Color::White),
             ),
         ]));
+    } else {
+        content_lines.push(Line::from(Span::styled(
+            "  No CPU data available",
+            Style::default().fg(Color::Yellow),
+        )));
     }
 
     content_lines.push(Line::from(""));
     content_lines.push(Line::from(""));
 
     // Memory Metrics Section
-    content_lines.push(Line::from(vec![Span::styled(
-        "Memory Utilization",
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-    )]));
-    content_lines.push(Line::from(""));
+    if app.config.metrics.show_charts && !metrics.memory_datapoints.is_empty() {
+        // Render Memory chart
+        let mem_chart_datapoints: Vec<ChartDatapoint> = metrics
+            .memory_datapoints
+            .iter()
+            .filter_map(|dp| dp.average.map(|avg| ChartDatapoint {
+                timestamp: dp.timestamp,
+                value: avg,
+            }))
+            .collect();
 
-    if metrics.memory_datapoints.is_empty() {
-        content_lines.push(Line::from(Span::styled(
-            "  No Memory data available",
-            Style::default().fg(Color::Yellow),
-        )));
+        if !mem_chart_datapoints.is_empty() {
+            let chart_config = ChartConfig {
+                width: 60,
+                height: 10,
+                min_value: None,  // Auto-scale based on data
+                max_value: None,  // Auto-scale based on data
+                line_color: Color::Cyan,
+                show_y_labels: true,
+            };
+
+            let chart_lines = render_chart(&mem_chart_datapoints, &chart_config, "Memory Utilization (%)");
+            content_lines.extend(chart_lines);
+        } else {
+            content_lines.push(Line::from(Span::styled(
+                "  Memory Utilization",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )));
+            content_lines.push(Line::from(Span::styled(
+                "  [All memory datapoints have None for average value]",
+                Style::default().fg(Color::Yellow),
+            )));
+        }
+        content_lines.push(Line::from(""));
     } else {
+        // Fallback to text-based metrics
+        content_lines.push(Line::from(vec![Span::styled(
+            "  Memory Utilization",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]));
+        content_lines.push(Line::from(""));
+    }
+
+    // Memory Statistics
+    if !metrics.memory_datapoints.is_empty() {
         let avg_mem: f64 = metrics
             .memory_datapoints
             .iter()
             .filter_map(|dp| dp.average)
             .sum::<f64>()
-            / metrics.memory_datapoints.len() as f64;
+            / metrics.memory_datapoints.iter().filter(|dp| dp.average.is_some()).count() as f64;
         let max_mem = metrics
             .memory_datapoints
             .iter()
@@ -780,33 +881,95 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
         content_lines.push(Line::from(vec![
             Span::styled("  Average: ", Style::default().fg(Color::Gray)),
             Span::styled(format!("{avg_mem:.2}%"), Style::default().fg(Color::Green)),
-        ]));
-        content_lines.push(Line::from(vec![
-            Span::styled("  Maximum: ", Style::default().fg(Color::Gray)),
+            Span::styled("  |  Maximum: ", Style::default().fg(Color::Gray)),
             Span::styled(format!("{max_mem:.2}%"), Style::default().fg(Color::Yellow)),
-        ]));
-        content_lines.push(Line::from(vec![
-            Span::styled("  Data points: ", Style::default().fg(Color::Gray)),
+            Span::styled("  |  Data points: ", Style::default().fg(Color::Gray)),
             Span::styled(
                 format!("{}", metrics.memory_datapoints.len()),
                 Style::default().fg(Color::White),
             ),
         ]));
+    } else {
+        content_lines.push(Line::from(Span::styled(
+            "  No Memory data available",
+            Style::default().fg(Color::Yellow),
+        )));
     }
 
-    let time_range = app.config.metrics.time_range_minutes;
+    let time_range_label = metrics.time_range.label();
+
     let metrics_widget = Paragraph::new(content_lines)
         .style(Style::default().fg(Color::White))
         .block(
             Block::default()
                 .title(format!(
-                    "Metrics (Last {time_range} min | r:refresh | Esc/h:back)"
+                    "Metrics [{}] (T:cycle range | r:refresh | Esc/h:back | ↑↓:scroll)",
+                    time_range_label
                 ))
                 .borders(Borders::ALL),
         )
+        .wrap(Wrap { trim: false })
+        .scroll((app.metrics_scroll as u16, 0));
+
+    f.render_widget(metrics_widget, metrics_area);
+}
+
+/// Renders the CloudWatch alarms section.
+///
+/// Displays alarms associated with the service, showing alarm name, state,
+/// and state reason in a compact format.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the alarms section
+/// * `metrics` - The metrics data containing alarms
+fn draw_alarms_section(f: &mut Frame, area: Rect, metrics: &crate::aws::Metrics) {
+    let mut alarm_lines: Vec<Line> = vec![];
+
+    alarm_lines.push(Line::from(vec![Span::styled(
+        "CloudWatch Alarms",
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    alarm_lines.push(Line::from(""));
+
+    for alarm in &metrics.alarms {
+        let state_color = match alarm.state.as_str() {
+            "OK" => Color::Green,
+            "ALARM" => Color::Red,
+            "INSUFFICIENT_DATA" => Color::Yellow,
+            _ => Color::Gray,
+        };
+
+        let state_symbol = match alarm.state.as_str() {
+            "OK" => "✓",
+            "ALARM" => "✗",
+            "INSUFFICIENT_DATA" => "?",
+            _ => "•",
+        };
+
+        alarm_lines.push(Line::from(vec![
+            Span::styled(format!("  {state_symbol} "), Style::default().fg(state_color)),
+            Span::styled(&alarm.name, Style::default().fg(Color::White)),
+            Span::styled(" [", Style::default().fg(Color::DarkGray)),
+            Span::styled(&alarm.state, Style::default().fg(state_color)),
+            Span::styled("]", Style::default().fg(Color::DarkGray)),
+        ]));
+
+        if let Some(reason) = &alarm.state_reason {
+            alarm_lines.push(Line::from(vec![
+                Span::styled("    ", Style::default()),
+                Span::styled(reason, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+    }
+
+    let alarms_widget = Paragraph::new(alarm_lines)
+        .block(Block::default().borders(Borders::ALL))
         .wrap(Wrap { trim: false });
 
-    f.render_widget(metrics_widget, area);
+    f.render_widget(alarms_widget, area);
 }
 
 /// Renders the help overlay showing all keyboard shortcuts.
@@ -896,6 +1059,10 @@ fn draw_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  m           ", Style::default().fg(Color::Yellow)),
             Span::raw("View metrics (from Services view)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  T           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Cycle time range (in Metrics view: 1h/6h/24h/7d)"),
         ]),
         Line::from(vec![
             Span::styled("  t           ", Style::default().fg(Color::Yellow)),

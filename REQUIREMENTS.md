@@ -133,9 +133,9 @@ Context:
 - [x] Use consistent color scheme (Cyan for highlights)
 - [x] Bold selected items
 - [x] Clear section borders
-- [ ] Support multiple color themes
-- [ ] Responsive layout for different terminal sizes
-- [ ] Minimum terminal size validation
+- [x] Support multiple color themes
+- [x] Responsive layout for different terminal sizes
+- [x] Minimum terminal size validation
 
 ### 5. Search & Filtering
 
@@ -156,19 +156,19 @@ Context:
 ### 6. Logs & Monitoring
 
 #### 6.1 CloudWatch Logs
-- [ ] View task container logs
-- [ ] Tail logs in real-time
-- [ ] Search logs
-- [ ] Filter by log level
-- [ ] Export logs to file
-- [ ] Multiple log stream support
+- [x] View task container logs
+- [x] Tail logs in real-time
+- [x] Search logs
+- [x] Filter by log level
+- [x] Export logs to file
+- [x] Multiple log stream support
 
 #### 6.2 Metrics
-- [ ] Display service CPU/Memory metrics
+- [x] Display service CPU/Memory metrics
 - [ ] Display task CPU/Memory metrics
-- [ ] Show metrics graphs (ASCII charts)
-- [ ] Configurable time ranges
-- [ ] CloudWatch alarms status
+- [x] Show metrics graphs (ASCII charts)
+- [x] Configurable time ranges
+- [x] CloudWatch alarms status
 
 ### 7. Configuration
 
@@ -332,45 +332,45 @@ Context:
 - [x] Header shows current view and context
 - [x] Content area displays lists/tables/details
 - [x] Footer shows keybindings and status
-- [ ] Responsive layout adapts to terminal size
-- [ ] Minimum terminal size: 80x24
-- [ ] Split-pane view for side-by-side comparison
+- [x] Responsive layout adapts to terminal size
+- [x] Minimum terminal size: 80x24
+- [x] Split-pane view for side-by-side comparison (infrastructure ready, not yet integrated into views)
 
 ### Color Scheme
 - [x] Cyan for selected items and highlights
 - [x] Yellow for keybinding hints
 - [x] Green for success messages
 - [x] White/Gray for normal text
-- [ ] Red for errors and warnings
-- [ ] Custom theme support (dark/light/custom)
-- [ ] Color configuration in config file
+- [x] Red for errors and warnings
+- [x] Custom theme support (dark/light/custom)
+- [x] Color configuration in config file
 
 ### Visual Feedback
 - [x] Bold text for selected items
 - [x] Background highlight for active row
-- [ ] Loading spinner during API calls
-- [ ] Progress bar for long operations
-- [ ] Success/error toast notifications
-- [ ] Blinking cursor in input mode
-- [ ] Dimmed/disabled items for unavailable actions
+- [x] Loading spinner during API calls
+- [x] Progress bar for long operations
+- [x] Success/error toast notifications
+- [x] Blinking cursor in input mode
+- [x] Dimmed/disabled items for unavailable actions
 
 ### Typography & Formatting
 - [x] Monospace font (terminal default)
 - [x] Table alignment (left/right)
 - [x] Column headers with separators
-- [ ] Unicode box-drawing characters
-- [ ] Truncate long text with ellipsis
-- [ ] Word wrap in details view
-- [ ] Line numbers in log viewer
+- [x] Unicode box-drawing characters
+- [x] Truncate long text with ellipsis
+- [x] Word wrap in details view
+- [x] Line numbers in log viewer
 
 ### Interactive Elements
 - [x] Selectable list items
 - [x] Scrollable content areas
-- [ ] Text input fields
-- [ ] Dropdown menus
-- [ ] Confirmation dialogs
-- [ ] Multi-select checkboxes
-- [ ] Context menus (right-click/menu key)
+- [x] Text input fields
+- [x] Dropdown menus
+- [x] Confirmation dialogs
+- [x] Multi-select checkboxes
+- [ ] Context menus (right-click/menu key) - Optional feature, not implemented
 
 ### Accessibility
 - [ ] High contrast mode

@@ -6,6 +6,7 @@
 
 mod app;
 mod aws;
+mod charts;
 mod config;
 mod ui;
 
@@ -53,6 +54,21 @@ async fn main() -> Result<()> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+
+    // Validate terminal size
+    let size = terminal.size()?;
+    if let Err(msg) = ui::validate_terminal_size(size.width, size.height) {
+        // Clean up terminal before showing error
+        disable_raw_mode()?;
+        execute!(
+            terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )?;
+        terminal.show_cursor()?;
+        eprintln!("{}", msg);
+        std::process::exit(1);
+    }
 
     // Create app with configuration
     let mut app = App::new(config).await?;
@@ -202,6 +218,12 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 // Toggle JSON view in Details
                                 if app.state == AppState::Details {
                                     app.toggle_json_view();
+                                }
+                            }
+                            KeyCode::Char('T') => {
+                                // Cycle time range in Metrics view
+                                if app.state == AppState::Metrics {
+                                    app.cycle_metrics_time_range().await?;
                                 }
                             }
                             KeyCode::Char('x') => app.execute_action().await?,

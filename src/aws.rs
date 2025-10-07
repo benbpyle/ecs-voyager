@@ -4,7 +4,7 @@
 //! with methods for listing clusters, services, tasks, and retrieving logs.
 
 use crate::app::{LogEntry, ServiceInfo, TaskInfo};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use aws_sdk_cloudwatch::Client as CloudWatchClient;
 use aws_sdk_cloudwatchlogs::Client as LogsClient;
 use aws_sdk_ecs::Client;
@@ -26,7 +26,6 @@ pub struct EcsClient {
 #[derive(Debug, Clone)]
 pub struct MetricDatapoint {
     /// Timestamp of the datapoint
-    #[allow(dead_code)]
     pub timestamp: i64,
     /// Average value
     pub average: Option<f64>,
@@ -43,6 +42,79 @@ pub struct MetricDatapoint {
     pub sample_count: Option<f64>,
 }
 
+/// Represents a CloudWatch alarm.
+#[derive(Debug, Clone)]
+pub struct CloudWatchAlarm {
+    /// Alarm name
+    pub name: String,
+    /// Alarm description
+    pub description: Option<String>,
+    /// Current state (OK, ALARM, INSUFFICIENT_DATA)
+    pub state: String,
+    /// State reason (why alarm is in this state)
+    pub state_reason: Option<String>,
+    /// Metric name this alarm monitors
+    pub metric_name: String,
+}
+
+/// Time range options for metrics display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeRange {
+    /// Last 1 hour (60 minutes)
+    OneHour,
+    /// Last 6 hours (360 minutes)
+    SixHours,
+    /// Last 24 hours (1440 minutes)
+    OneDay,
+    /// Last 7 days (10080 minutes)
+    SevenDays,
+}
+
+impl TimeRange {
+    /// Returns the number of minutes for this time range.
+    pub fn minutes(&self) -> i32 {
+        match self {
+            TimeRange::OneHour => 60,
+            TimeRange::SixHours => 360,
+            TimeRange::OneDay => 1440,
+            TimeRange::SevenDays => 10080,
+        }
+    }
+
+    /// Returns a human-readable label for this time range.
+    pub fn label(&self) -> &'static str {
+        match self {
+            TimeRange::OneHour => "1h",
+            TimeRange::SixHours => "6h",
+            TimeRange::OneDay => "24h",
+            TimeRange::SevenDays => "7d",
+        }
+    }
+
+    /// Returns the next time range in the cycle.
+    pub fn next(&self) -> TimeRange {
+        match self {
+            TimeRange::OneHour => TimeRange::SixHours,
+            TimeRange::SixHours => TimeRange::OneDay,
+            TimeRange::OneDay => TimeRange::SevenDays,
+            TimeRange::SevenDays => TimeRange::OneHour,
+        }
+    }
+
+    /// Converts minutes to the closest TimeRange variant.
+    pub fn from_minutes(minutes: i32) -> TimeRange {
+        if minutes <= 60 {
+            TimeRange::OneHour
+        } else if minutes <= 360 {
+            TimeRange::SixHours
+        } else if minutes <= 1440 {
+            TimeRange::OneDay
+        } else {
+            TimeRange::SevenDays
+        }
+    }
+}
+
 /// Container for service or task metrics.
 #[derive(Debug, Clone)]
 pub struct Metrics {
@@ -50,6 +122,14 @@ pub struct Metrics {
     pub cpu_datapoints: Vec<MetricDatapoint>,
     /// Memory utilization percentage datapoints
     pub memory_datapoints: Vec<MetricDatapoint>,
+    /// CloudWatch alarms related to this service
+    pub alarms: Vec<CloudWatchAlarm>,
+    /// Time range for these metrics
+    pub time_range: TimeRange,
+    /// Cluster name
+    pub cluster_name: String,
+    /// Service name
+    pub service_name: String,
 }
 
 impl EcsClient {
@@ -690,35 +770,135 @@ impl EcsClient {
         Ok(logs)
     }
 
-    /// Fetches CloudWatch metrics for an ECS service.
+    /// Fetches CloudWatch alarms for an ECS service.
     ///
-    /// Retrieves CPU and Memory utilization metrics for the specified service
-    /// over the configured time range.
+    /// Retrieves alarms that monitor the specified ECS service. Searches for alarms
+    /// with metric dimensions matching the service and cluster name.
     ///
     /// # Arguments
     /// * `cluster_name` - Name of the ECS cluster
     /// * `service_name` - Name of the ECS service
-    /// * `time_range_minutes` - Number of minutes of historical data to fetch
     ///
     /// # Returns
-    /// Returns `Metrics` containing CPU and memory datapoints
+    /// Returns vector of `CloudWatchAlarm` structs
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The AWS DescribeAlarms API call fails
+    /// - Insufficient permissions to read alarms
+    pub async fn get_service_alarms(
+        &self,
+        cluster_name: &str,
+        service_name: &str,
+    ) -> Result<Vec<CloudWatchAlarm>> {
+        // Describe alarms for this service
+        let response = self
+            .metrics_client
+            .describe_alarms()
+            .send()
+            .await?;
+
+        let mut alarms = Vec::new();
+
+        // Filter alarms that are related to this ECS service
+        for alarm in response.metric_alarms() {
+            // Check if alarm dimensions match our service
+            let metrics = alarm.metrics();
+            if !metrics.is_empty() {
+                for metric_data in metrics {
+                    if let Some(metric) = metric_data.metric_stat() {
+                        if let Some(metric_obj) = metric.metric() {
+                            // Check if this is an ECS metric for our service
+                            let is_ecs_service_metric = metric_obj
+                                .dimensions()
+                                .iter()
+                                .any(|dim| {
+                                    (dim.name() == Some("ServiceName") && dim.value() == Some(service_name))
+                                        || (dim.name() == Some("ClusterName") && dim.value() == Some(cluster_name))
+                                });
+
+                            if is_ecs_service_metric {
+                                alarms.push(CloudWatchAlarm {
+                                    name: alarm.alarm_name().unwrap_or("Unknown").to_string(),
+                                    description: alarm.alarm_description().map(|s| s.to_string()),
+                                    state: alarm
+                                        .state_value()
+                                        .map(|s| s.as_str().to_string())
+                                        .unwrap_or_else(|| "UNKNOWN".to_string()),
+                                    state_reason: alarm.state_reason().map(|s| s.to_string()),
+                                    metric_name: metric_obj.metric_name().unwrap_or("Unknown").to_string(),
+                                });
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(alarms)
+    }
+
+    /// Fetches CloudWatch metrics for an ECS service.
+    ///
+    /// Retrieves CPU and Memory utilization metrics for the specified service
+    /// over the configured time range, along with CloudWatch alarms.
+    ///
+    /// # Arguments
+    /// * `cluster_name` - Name of the ECS cluster
+    /// * `service_name` - Name of the ECS service
+    /// * `time_range` - Time range for metrics (1h, 6h, 24h, 7d)
+    ///
+    /// # Returns
+    /// Returns `Metrics` containing CPU/memory datapoints and alarms
     ///
     /// # Errors
     /// This function will return an error if:
     /// - The AWS GetMetricStatistics API call fails
     /// - Insufficient permissions to read metrics
+    /// Helper function to create a CloudWatch Dimension with required name and value.
+    ///
+    /// Both name and value are required by the CloudWatch API, even though the SDK
+    /// allows them to be optional. This helper ensures they are always set.
+    fn create_dimension(name: &str, value: &str) -> aws_sdk_cloudwatch::types::Dimension {
+        aws_sdk_cloudwatch::types::Dimension::builder()
+            .name(name)
+            .value(value)
+            .build()
+    }
+
     pub async fn get_service_metrics(
         &self,
         cluster_name: &str,
         service_name: &str,
-        time_range_minutes: i32,
+        time_range: TimeRange,
     ) -> Result<Metrics> {
-        use aws_sdk_cloudwatch::types::Dimension;
         use std::time::{SystemTime, UNIX_EPOCH};
 
+        // Validate inputs
+        if cluster_name.is_empty() {
+            anyhow::bail!("Cluster name cannot be empty");
+        }
+        if service_name.is_empty() {
+            anyhow::bail!("Service name cannot be empty");
+        }
+
         let now = SystemTime::now();
-        let end_time = now.duration_since(UNIX_EPOCH)?.as_secs() as i64;
+        let end_time = now
+            .duration_since(UNIX_EPOCH)
+            .context("Failed to get current time")?
+            .as_secs() as i64;
+        let time_range_minutes = time_range.minutes();
         let start_time = end_time - (time_range_minutes as i64 * 60);
+
+        eprintln!(
+            "Fetching metrics for service: {} in cluster: {} (time range: {} minutes)",
+            service_name, cluster_name, time_range_minutes
+        );
+
+        // Create dimensions once (both metrics use the same dimensions)
+        let service_dimension = Self::create_dimension("ServiceName", service_name);
+        let cluster_dimension = Self::create_dimension("ClusterName", cluster_name);
 
         // Fetch CPU utilization
         let cpu_response = self
@@ -726,18 +906,8 @@ impl EcsClient {
             .get_metric_statistics()
             .namespace("AWS/ECS")
             .metric_name("CPUUtilization")
-            .dimensions(
-                Dimension::builder()
-                    .name("ServiceName")
-                    .value(service_name)
-                    .build(),
-            )
-            .dimensions(
-                Dimension::builder()
-                    .name("ClusterName")
-                    .value(cluster_name)
-                    .build(),
-            )
+            .dimensions(service_dimension.clone())
+            .dimensions(cluster_dimension.clone())
             .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(
                 start_time,
             ))
@@ -748,7 +918,13 @@ impl EcsClient {
             .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
             .statistics(aws_sdk_cloudwatch::types::Statistic::Maximum)
             .send()
-            .await?;
+            .await
+            .context("Failed to fetch CPU utilization metrics from CloudWatch")?;
+
+        eprintln!(
+            "Received {} CPU datapoints",
+            cpu_response.datapoints().len()
+        );
 
         // Fetch Memory utilization
         let memory_response = self
@@ -756,18 +932,8 @@ impl EcsClient {
             .get_metric_statistics()
             .namespace("AWS/ECS")
             .metric_name("MemoryUtilization")
-            .dimensions(
-                Dimension::builder()
-                    .name("ServiceName")
-                    .value(service_name)
-                    .build(),
-            )
-            .dimensions(
-                Dimension::builder()
-                    .name("ClusterName")
-                    .value(cluster_name)
-                    .build(),
-            )
+            .dimensions(service_dimension)
+            .dimensions(cluster_dimension)
             .start_time(aws_sdk_cloudwatch::primitives::DateTime::from_secs(
                 start_time,
             ))
@@ -778,10 +944,16 @@ impl EcsClient {
             .statistics(aws_sdk_cloudwatch::types::Statistic::Average)
             .statistics(aws_sdk_cloudwatch::types::Statistic::Maximum)
             .send()
-            .await?;
+            .await
+            .context("Failed to fetch memory utilization metrics from CloudWatch")?;
 
-        // Convert datapoints
-        let cpu_datapoints = cpu_response
+        eprintln!(
+            "Received {} memory datapoints",
+            memory_response.datapoints().len()
+        );
+
+        // Convert datapoints and sort by timestamp
+        let mut cpu_datapoints: Vec<MetricDatapoint> = cpu_response
             .datapoints()
             .iter()
             .map(|dp| MetricDatapoint {
@@ -793,8 +965,9 @@ impl EcsClient {
                 sample_count: dp.sample_count(),
             })
             .collect();
+        cpu_datapoints.sort_by_key(|dp| dp.timestamp);
 
-        let memory_datapoints = memory_response
+        let mut memory_datapoints: Vec<MetricDatapoint> = memory_response
             .datapoints()
             .iter()
             .map(|dp| MetricDatapoint {
@@ -806,10 +979,21 @@ impl EcsClient {
                 sample_count: dp.sample_count(),
             })
             .collect();
+        memory_datapoints.sort_by_key(|dp| dp.timestamp);
+
+        // Fetch alarms for this service
+        let alarms = self
+            .get_service_alarms(cluster_name, service_name)
+            .await
+            .unwrap_or_default();
 
         Ok(Metrics {
             cpu_datapoints,
             memory_datapoints,
+            alarms,
+            time_range,
+            cluster_name: cluster_name.to_string(),
+            service_name: service_name.to_string(),
         })
     }
 }
@@ -973,6 +1157,323 @@ mod tests {
         // Both should have same timestamp
         assert_eq!(logs[0].timestamp, 1000);
         assert_eq!(logs[1].timestamp, 1000);
+    }
+
+    // Test TimeRange functionality
+    #[test]
+    fn test_time_range_minutes() {
+        assert_eq!(TimeRange::OneHour.minutes(), 60);
+        assert_eq!(TimeRange::SixHours.minutes(), 360);
+        assert_eq!(TimeRange::OneDay.minutes(), 1440);
+        assert_eq!(TimeRange::SevenDays.minutes(), 10080);
+    }
+
+    #[test]
+    fn test_time_range_label() {
+        assert_eq!(TimeRange::OneHour.label(), "1h");
+        assert_eq!(TimeRange::SixHours.label(), "6h");
+        assert_eq!(TimeRange::OneDay.label(), "24h");
+        assert_eq!(TimeRange::SevenDays.label(), "7d");
+    }
+
+    #[test]
+    fn test_time_range_next_cycle() {
+        assert_eq!(TimeRange::OneHour.next(), TimeRange::SixHours);
+        assert_eq!(TimeRange::SixHours.next(), TimeRange::OneDay);
+        assert_eq!(TimeRange::OneDay.next(), TimeRange::SevenDays);
+        assert_eq!(TimeRange::SevenDays.next(), TimeRange::OneHour);
+    }
+
+    #[test]
+    fn test_time_range_from_minutes() {
+        assert_eq!(TimeRange::from_minutes(30), TimeRange::OneHour);
+        assert_eq!(TimeRange::from_minutes(60), TimeRange::OneHour);
+        assert_eq!(TimeRange::from_minutes(120), TimeRange::SixHours);
+        assert_eq!(TimeRange::from_minutes(360), TimeRange::SixHours);
+        assert_eq!(TimeRange::from_minutes(720), TimeRange::OneDay);
+        assert_eq!(TimeRange::from_minutes(1440), TimeRange::OneDay);
+        assert_eq!(TimeRange::from_minutes(5000), TimeRange::SevenDays);
+        assert_eq!(TimeRange::from_minutes(10080), TimeRange::SevenDays);
+    }
+
+    #[test]
+    fn test_time_range_equality() {
+        assert_eq!(TimeRange::OneHour, TimeRange::OneHour);
+        assert_ne!(TimeRange::OneHour, TimeRange::SixHours);
+        assert_eq!(TimeRange::SevenDays, TimeRange::SevenDays);
+    }
+
+    // Test MetricDatapoint structure
+    #[test]
+    fn test_metric_datapoint_creation() {
+        let dp = MetricDatapoint {
+            timestamp: 1234567890,
+            average: Some(45.5),
+            maximum: Some(75.0),
+            minimum: Some(20.0),
+            sum: Some(500.0),
+            sample_count: Some(10.0),
+        };
+
+        assert_eq!(dp.timestamp, 1234567890);
+        assert_eq!(dp.average, Some(45.5));
+        assert_eq!(dp.maximum, Some(75.0));
+        assert_eq!(dp.minimum, Some(20.0));
+        assert_eq!(dp.sum, Some(500.0));
+        assert_eq!(dp.sample_count, Some(10.0));
+    }
+
+    #[test]
+    fn test_metric_datapoint_with_none_values() {
+        let dp = MetricDatapoint {
+            timestamp: 1234567890,
+            average: None,
+            maximum: None,
+            minimum: None,
+            sum: None,
+            sample_count: None,
+        };
+
+        assert_eq!(dp.timestamp, 1234567890);
+        assert!(dp.average.is_none());
+        assert!(dp.maximum.is_none());
+        assert!(dp.minimum.is_none());
+        assert!(dp.sum.is_none());
+        assert!(dp.sample_count.is_none());
+    }
+
+    #[test]
+    fn test_metric_datapoint_sorting_by_timestamp() {
+        let mut datapoints = vec![
+            MetricDatapoint {
+                timestamp: 3000,
+                average: Some(50.0),
+                maximum: Some(60.0),
+                minimum: Some(40.0),
+                sum: Some(100.0),
+                sample_count: Some(2.0),
+            },
+            MetricDatapoint {
+                timestamp: 1000,
+                average: Some(30.0),
+                maximum: Some(35.0),
+                minimum: Some(25.0),
+                sum: Some(60.0),
+                sample_count: Some(2.0),
+            },
+            MetricDatapoint {
+                timestamp: 2000,
+                average: Some(40.0),
+                maximum: Some(45.0),
+                minimum: Some(35.0),
+                sum: Some(80.0),
+                sample_count: Some(2.0),
+            },
+        ];
+
+        datapoints.sort_by_key(|dp| dp.timestamp);
+
+        assert_eq!(datapoints[0].timestamp, 1000);
+        assert_eq!(datapoints[1].timestamp, 2000);
+        assert_eq!(datapoints[2].timestamp, 3000);
+        assert_eq!(datapoints[0].average, Some(30.0));
+        assert_eq!(datapoints[1].average, Some(40.0));
+        assert_eq!(datapoints[2].average, Some(50.0));
+    }
+
+    // Test CloudWatchAlarm structure
+    #[test]
+    fn test_cloudwatch_alarm_creation() {
+        let alarm = CloudWatchAlarm {
+            name: "HighCPUAlarm".to_string(),
+            description: Some("CPU usage above 80%".to_string()),
+            state: "ALARM".to_string(),
+            state_reason: Some("Threshold crossed".to_string()),
+            metric_name: "CPUUtilization".to_string(),
+        };
+
+        assert_eq!(alarm.name, "HighCPUAlarm");
+        assert_eq!(alarm.description, Some("CPU usage above 80%".to_string()));
+        assert_eq!(alarm.state, "ALARM");
+        assert_eq!(alarm.state_reason, Some("Threshold crossed".to_string()));
+        assert_eq!(alarm.metric_name, "CPUUtilization");
+    }
+
+    #[test]
+    fn test_cloudwatch_alarm_ok_state() {
+        let alarm = CloudWatchAlarm {
+            name: "TestAlarm".to_string(),
+            description: None,
+            state: "OK".to_string(),
+            state_reason: None,
+            metric_name: "MemoryUtilization".to_string(),
+        };
+
+        assert_eq!(alarm.state, "OK");
+        assert!(alarm.description.is_none());
+        assert!(alarm.state_reason.is_none());
+    }
+
+    #[test]
+    fn test_cloudwatch_alarm_insufficient_data_state() {
+        let alarm = CloudWatchAlarm {
+            name: "NewAlarm".to_string(),
+            description: Some("New alarm without data".to_string()),
+            state: "INSUFFICIENT_DATA".to_string(),
+            state_reason: Some("Not enough data points".to_string()),
+            metric_name: "NetworkIn".to_string(),
+        };
+
+        assert_eq!(alarm.state, "INSUFFICIENT_DATA");
+    }
+
+    // Test Metrics structure
+    #[test]
+    fn test_metrics_creation() {
+        let metrics = Metrics {
+            cpu_datapoints: vec![],
+            memory_datapoints: vec![],
+            alarms: vec![],
+            time_range: TimeRange::OneHour,
+            cluster_name: "test-cluster".to_string(),
+            service_name: "test-service".to_string(),
+        };
+
+        assert!(metrics.cpu_datapoints.is_empty());
+        assert!(metrics.memory_datapoints.is_empty());
+        assert!(metrics.alarms.is_empty());
+        assert_eq!(metrics.time_range, TimeRange::OneHour);
+        assert_eq!(metrics.cluster_name, "test-cluster");
+        assert_eq!(metrics.service_name, "test-service");
+    }
+
+    #[test]
+    fn test_metrics_with_data() {
+        let cpu_dp = MetricDatapoint {
+            timestamp: 1000,
+            average: Some(50.0),
+            maximum: Some(60.0),
+            minimum: Some(40.0),
+            sum: Some(100.0),
+            sample_count: Some(2.0),
+        };
+
+        let mem_dp = MetricDatapoint {
+            timestamp: 1000,
+            average: Some(70.0),
+            maximum: Some(80.0),
+            minimum: Some(60.0),
+            sum: Some(140.0),
+            sample_count: Some(2.0),
+        };
+
+        let alarm = CloudWatchAlarm {
+            name: "TestAlarm".to_string(),
+            description: None,
+            state: "OK".to_string(),
+            state_reason: None,
+            metric_name: "CPUUtilization".to_string(),
+        };
+
+        let metrics = Metrics {
+            cpu_datapoints: vec![cpu_dp],
+            memory_datapoints: vec![mem_dp],
+            alarms: vec![alarm],
+            time_range: TimeRange::SixHours,
+            cluster_name: "prod-cluster".to_string(),
+            service_name: "web-service".to_string(),
+        };
+
+        assert_eq!(metrics.cpu_datapoints.len(), 1);
+        assert_eq!(metrics.memory_datapoints.len(), 1);
+        assert_eq!(metrics.alarms.len(), 1);
+        assert_eq!(metrics.time_range, TimeRange::SixHours);
+        assert_eq!(metrics.cpu_datapoints[0].average, Some(50.0));
+        assert_eq!(metrics.memory_datapoints[0].average, Some(70.0));
+        assert_eq!(metrics.alarms[0].state, "OK");
+    }
+
+    #[test]
+    fn test_metrics_clone() {
+        let metrics = Metrics {
+            cpu_datapoints: vec![],
+            memory_datapoints: vec![],
+            alarms: vec![],
+            time_range: TimeRange::OneDay,
+            cluster_name: "cluster-1".to_string(),
+            service_name: "service-1".to_string(),
+        };
+
+        let cloned = metrics.clone();
+        assert_eq!(cloned.cluster_name, metrics.cluster_name);
+        assert_eq!(cloned.service_name, metrics.service_name);
+        assert_eq!(cloned.time_range, metrics.time_range);
+    }
+
+    // Test edge cases
+    #[test]
+    fn test_metrics_with_multiple_datapoints() {
+        let datapoints: Vec<MetricDatapoint> = (0..100)
+            .map(|i| MetricDatapoint {
+                timestamp: i as i64 * 300, // 5-minute intervals
+                average: Some(50.0 + (i as f64 % 20.0)),
+                maximum: Some(60.0 + (i as f64 % 20.0)),
+                minimum: Some(40.0 + (i as f64 % 20.0)),
+                sum: Some(100.0),
+                sample_count: Some(2.0),
+            })
+            .collect();
+
+        assert_eq!(datapoints.len(), 100);
+        assert_eq!(datapoints[0].timestamp, 0);
+        assert_eq!(datapoints[99].timestamp, 29700);
+    }
+
+    #[test]
+    fn test_metrics_with_multiple_alarms() {
+        let alarms = vec![
+            CloudWatchAlarm {
+                name: "CPUAlarm".to_string(),
+                description: Some("High CPU".to_string()),
+                state: "ALARM".to_string(),
+                state_reason: Some("CPU > 80%".to_string()),
+                metric_name: "CPUUtilization".to_string(),
+            },
+            CloudWatchAlarm {
+                name: "MemoryAlarm".to_string(),
+                description: Some("High Memory".to_string()),
+                state: "OK".to_string(),
+                state_reason: None,
+                metric_name: "MemoryUtilization".to_string(),
+            },
+            CloudWatchAlarm {
+                name: "NetworkAlarm".to_string(),
+                description: None,
+                state: "INSUFFICIENT_DATA".to_string(),
+                state_reason: Some("New alarm".to_string()),
+                metric_name: "NetworkIn".to_string(),
+            },
+        ];
+
+        assert_eq!(alarms.len(), 3);
+        assert_eq!(alarms[0].state, "ALARM");
+        assert_eq!(alarms[1].state, "OK");
+        assert_eq!(alarms[2].state, "INSUFFICIENT_DATA");
+    }
+
+    #[test]
+    fn test_time_range_cycle_completeness() {
+        // Verify that cycling through all ranges returns to start
+        let start = TimeRange::OneHour;
+        let cycle1 = start.next();
+        let cycle2 = cycle1.next();
+        let cycle3 = cycle2.next();
+        let cycle4 = cycle3.next();
+
+        assert_eq!(cycle1, TimeRange::SixHours);
+        assert_eq!(cycle2, TimeRange::OneDay);
+        assert_eq!(cycle3, TimeRange::SevenDays);
+        assert_eq!(cycle4, TimeRange::OneHour); // Full cycle complete
     }
 
     // Test default value handling

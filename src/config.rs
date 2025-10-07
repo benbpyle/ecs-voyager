@@ -67,10 +67,27 @@ pub struct BehaviorConfig {
 /// UI configuration options.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiConfig {
-    /// Color theme for the UI (for future use)
+    /// Color theme preset
     /// Options: "dark", "light", "custom"
     #[serde(default = "default_theme")]
     pub theme: String,
+
+    /// Border style for UI elements
+    /// Options: "normal", "rounded", "double"
+    #[serde(default = "default_border_style")]
+    pub border_style: String,
+
+    /// Show breadcrumbs in status bar
+    #[serde(default = "default_true")]
+    pub show_breadcrumbs: bool,
+
+    /// Minimum terminal width (enforced on startup)
+    #[serde(default = "default_min_width")]
+    pub min_terminal_width: u16,
+
+    /// Minimum terminal height (enforced on startup)
+    #[serde(default = "default_min_height")]
+    pub min_terminal_height: u16,
 }
 
 /// Logs configuration options.
@@ -100,13 +117,21 @@ pub struct MetricsConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
 
-    /// Metrics time range in minutes
+    /// Default metrics time range in minutes
     #[serde(default = "default_metrics_range")]
     pub time_range_minutes: i32,
 
     /// Metrics refresh interval in seconds
     #[serde(default = "default_metrics_refresh")]
     pub refresh_interval: u64,
+
+    /// Enable CloudWatch alarms display
+    #[serde(default = "default_true")]
+    pub show_alarms: bool,
+
+    /// Enable ASCII charts for metrics visualization
+    #[serde(default = "default_true")]
+    pub show_charts: bool,
 }
 
 // Default value functions for serde
@@ -124,6 +149,18 @@ fn default_view() -> String {
 
 fn default_theme() -> String {
     "dark".to_string()
+}
+
+fn default_border_style() -> String {
+    "normal".to_string()
+}
+
+fn default_min_width() -> u16 {
+    80
+}
+
+fn default_min_height() -> u16 {
+    24
 }
 
 fn default_true() -> bool {
@@ -158,6 +195,10 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             theme: default_theme(),
+            border_style: default_border_style(),
+            show_breadcrumbs: default_true(),
+            min_terminal_width: default_min_width(),
+            min_terminal_height: default_min_height(),
         }
     }
 }
@@ -179,6 +220,8 @@ impl Default for MetricsConfig {
             enabled: default_true(),
             time_range_minutes: default_metrics_range(),
             refresh_interval: default_metrics_refresh(),
+            show_alarms: default_true(),
+            show_charts: default_true(),
         }
     }
 }
@@ -277,9 +320,20 @@ refresh_interval = 30
 default_view = "clusters"
 
 [ui]
-# Color theme (for future use)
-# Options: "dark", "light"
+# Color theme preset
+# Options: "dark", "light", "custom"
 theme = "dark"
+
+# Border style for UI elements
+# Options: "normal", "rounded", "double"
+border_style = "normal"
+
+# Show breadcrumbs in status bar
+show_breadcrumbs = true
+
+# Minimum terminal dimensions (enforced on startup)
+min_terminal_width = 80
+min_terminal_height = 24
 
 [logs]
 # Enable log search highlighting
@@ -298,11 +352,17 @@ export_dir = "~/Downloads"
 # Enable CloudWatch metrics display
 enabled = true
 
-# Metrics time range in minutes
+# Default metrics time range in minutes (can cycle: 60, 360, 1440, 10080)
 time_range_minutes = 60
 
 # Metrics refresh interval in seconds
 refresh_interval = 60
+
+# Show CloudWatch alarms status
+show_alarms = true
+
+# Show ASCII charts for metrics visualization
+show_charts = true
 "#;
 
         fs::write(&config_path, default_toml)

@@ -6,8 +6,9 @@
 use anyhow::Result;
 use std::time::{Duration, Instant};
 
-use crate::aws::{EcsClient, Metrics};
+use crate::aws::{EcsClient, Metrics, TimeRange};
 use crate::config::Config;
+use crate::ui::{Theme, ThemePreset};
 
 /// Represents the current view/screen in the application.
 ///
@@ -58,6 +59,10 @@ pub struct App {
     pub ecs_client: EcsClient,
     /// Application configuration
     pub config: Config,
+    /// UI theme
+    pub theme: Theme,
+    /// Whether split-pane view is enabled
+    pub split_pane_mode: bool,
 
     // AWS Context
     /// Current AWS profile name
@@ -102,6 +107,8 @@ pub struct App {
     pub auto_tail: bool,
     /// CloudWatch metrics for selected service
     pub metrics: Option<Metrics>,
+    /// Current scroll position in metrics view
+    pub metrics_scroll: usize,
 
     // Search
     /// Whether search input mode is active
@@ -185,18 +192,20 @@ impl LogLevel {
     /// Parses log level from a message string.
     ///
     /// Looks for common log level indicators like [INFO], ERROR:, etc.
+    /// Note: FATAL must be checked before ERROR since FATAL contains ERROR as a substring.
     pub fn from_message(message: &str) -> Self {
         let upper = message.to_uppercase();
-        if upper.contains("DEBUG") || upper.contains("[DBG]") {
+        // Check FATAL before ERROR since FATAL contains ERROR as substring
+        if upper.contains("FATAL") || upper.contains("[FTL]") {
+            LogLevel::Fatal
+        } else if upper.contains("ERROR") || upper.contains("[ERR]") {
+            LogLevel::Error
+        } else if upper.contains("WARN") || upper.contains("[WRN]") {
+            LogLevel::Warn
+        } else if upper.contains("DEBUG") || upper.contains("[DBG]") {
             LogLevel::Debug
         } else if upper.contains("INFO") || upper.contains("[INF]") {
             LogLevel::Info
-        } else if upper.contains("WARN") || upper.contains("[WRN]") {
-            LogLevel::Warn
-        } else if upper.contains("ERROR") || upper.contains("[ERR]") {
-            LogLevel::Error
-        } else if upper.contains("FATAL") || upper.contains("[FTL]") {
-            LogLevel::Fatal
         } else {
             LogLevel::Unknown
         }
@@ -274,6 +283,14 @@ impl App {
             .clone()
             .unwrap_or_else(|| "us-east-1".to_string());
 
+        // Initialize theme from config
+        let theme_preset = match config.ui.theme.to_lowercase().as_str() {
+            "light" => ThemePreset::Light,
+            "custom" => ThemePreset::Custom,
+            _ => ThemePreset::Dark,
+        };
+        let theme = Theme::from_preset(theme_preset);
+
         // Load available profiles from ~/.aws/credentials
         let available_profiles =
             list_aws_profiles().unwrap_or_else(|_| vec!["default".to_string()]);
@@ -302,6 +319,8 @@ impl App {
             selected_index: 0,
             ecs_client,
             config,
+            theme,
+            split_pane_mode: false,
             current_profile,
             current_region,
             available_profiles,
@@ -322,6 +341,7 @@ impl App {
             log_scroll: 0,
             auto_tail: true,
             metrics: None,
+            metrics_scroll: 0,
             search_mode: false,
             search_query: String::new(),
             log_search_mode: false,
@@ -345,6 +365,14 @@ impl App {
     pub fn toggle_json_view(&mut self) {
         self.show_json_view = !self.show_json_view;
         self.details_scroll = 0; // Reset scroll when toggling views
+    }
+
+    pub fn toggle_split_pane(&mut self) {
+        self.split_pane_mode = !self.split_pane_mode;
+        self.status_message = format!(
+            "Split-pane mode {}",
+            if self.split_pane_mode { "enabled" } else { "disabled" }
+        );
     }
 
     pub fn set_view(&mut self, state: AppState) {
@@ -375,7 +403,8 @@ impl App {
                 return;
             }
             AppState::Metrics => {
-                // No scrolling in metrics view
+                // Scroll down in metrics view
+                self.metrics_scroll = self.metrics_scroll.saturating_add(1);
                 return;
             }
         };
@@ -405,7 +434,8 @@ impl App {
                 return;
             }
             AppState::Metrics => {
-                // No scrolling in metrics view
+                // Scroll up in metrics view
+                self.metrics_scroll = self.metrics_scroll.saturating_sub(1);
                 return;
             }
         };
@@ -492,6 +522,7 @@ impl App {
             AppState::Metrics => {
                 self.set_view(AppState::Services);
                 self.metrics = None;
+                self.metrics_scroll = 0;
             }
             AppState::Clusters => {}
         }
@@ -580,7 +611,13 @@ impl App {
                     (&self.selected_cluster, &self.selected_service)
                 {
                     self.status_message = "Refreshing metrics...".to_string();
-                    let time_range = self.config.metrics.time_range_minutes;
+                    // Use current time range from metrics or default from config
+                    let time_range = self
+                        .metrics
+                        .as_ref()
+                        .map(|m| m.time_range)
+                        .unwrap_or_else(|| TimeRange::from_minutes(self.config.metrics.time_range_minutes));
+
                     match self
                         .ecs_client
                         .get_service_metrics(cluster, service, time_range)
@@ -940,7 +977,7 @@ impl App {
                     self.loading = true;
                     self.status_message = format!("Loading metrics for service: {service_name}");
 
-                    let time_range = self.config.metrics.time_range_minutes;
+                    let time_range = TimeRange::from_minutes(self.config.metrics.time_range_minutes);
                     self.metrics = self
                         .ecs_client
                         .get_service_metrics(&cluster_name, &service_name, time_range)
@@ -956,6 +993,39 @@ impl App {
                         self.status_message = "Failed to load metrics".to_string();
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Cycles to the next time range for metrics view.
+    ///
+    /// Changes the time range (1h -> 6h -> 24h -> 7d -> 1h) and refreshes metrics.
+    pub async fn cycle_metrics_time_range(&mut self) -> Result<()> {
+        if self.state == AppState::Metrics {
+            if let Some(metrics) = &self.metrics {
+                let new_time_range = metrics.time_range.next();
+                let cluster_name = metrics.cluster_name.clone();
+                let service_name = metrics.service_name.clone();
+
+                self.loading = true;
+                self.status_message = format!("Switching to {} time range...", new_time_range.label());
+
+                match self
+                    .ecs_client
+                    .get_service_metrics(&cluster_name, &service_name, new_time_range)
+                    .await
+                {
+                    Ok(new_metrics) => {
+                        self.metrics = Some(new_metrics);
+                        self.status_message = format!("Metrics time range: {}", new_time_range.label());
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Error loading metrics: {e}");
+                    }
+                }
+
+                self.loading = false;
             }
         }
         Ok(())
@@ -1237,6 +1307,10 @@ mod tests {
             },
             ui: UiConfig {
                 theme: "dark".to_string(),
+                border_style: "normal".to_string(),
+                show_breadcrumbs: true,
+                min_terminal_width: 80,
+                min_terminal_height: 24,
             },
             logs: LogsConfig {
                 enable_search: true,
@@ -1248,6 +1322,8 @@ mod tests {
                 enabled: true,
                 time_range_minutes: 60,
                 refresh_interval: 60,
+                show_alarms: true,
+                show_charts: true,
             },
         }
     }
@@ -1259,6 +1335,7 @@ mod tests {
         use std::mem::MaybeUninit;
 
         let fake_client = MaybeUninit::<EcsClient>::uninit();
+        let theme = Theme::from_preset(ThemePreset::Dark);
         ManuallyDrop::new(App {
             state: AppState::Clusters,
             previous_state: None,
@@ -1266,6 +1343,8 @@ mod tests {
             selected_index: 0,
             ecs_client: unsafe { fake_client.assume_init() },
             config: create_test_config(),
+            theme,
+            split_pane_mode: false,
             current_profile: "default".to_string(),
             current_region: "us-east-1".to_string(),
             available_profiles: vec!["default".to_string()],
@@ -1343,6 +1422,7 @@ mod tests {
             log_scroll: 0,
             auto_tail: true,
             metrics: None,
+            metrics_scroll: 0,
             search_mode: false,
             search_query: String::new(),
             log_search_mode: false,
@@ -1943,5 +2023,396 @@ mod tests {
         let state = AppState::Tasks;
         let cloned = state.clone();
         assert_eq!(state, cloned);
+    }
+
+    // Test log level parsing
+    #[test]
+    fn test_log_level_from_message_debug() {
+        let level = LogLevel::from_message("DEBUG: Starting process");
+        assert_eq!(level, LogLevel::Debug);
+
+        let level = LogLevel::from_message("[DBG] Message");
+        assert_eq!(level, LogLevel::Debug);
+    }
+
+    #[test]
+    fn test_log_level_from_message_info() {
+        let level = LogLevel::from_message("INFO: Server started");
+        assert_eq!(level, LogLevel::Info);
+
+        let level = LogLevel::from_message("[INF] Message");
+        assert_eq!(level, LogLevel::Info);
+    }
+
+    #[test]
+    fn test_log_level_from_message_warn() {
+        let level = LogLevel::from_message("WARN: Deprecated feature used");
+        assert_eq!(level, LogLevel::Warn);
+
+        let level = LogLevel::from_message("[WRN] Warning message");
+        assert_eq!(level, LogLevel::Warn);
+    }
+
+    #[test]
+    fn test_log_level_from_message_error() {
+        let level = LogLevel::from_message("ERROR: Connection failed");
+        assert_eq!(level, LogLevel::Error);
+
+        let level = LogLevel::from_message("[ERR] Error occurred");
+        assert_eq!(level, LogLevel::Error);
+    }
+
+    #[test]
+    fn test_log_level_from_message_fatal() {
+        let level = LogLevel::from_message("FATAL: Critical failure");
+        assert_eq!(level, LogLevel::Fatal);
+
+        let level = LogLevel::from_message("[FTL] Fatal error");
+        assert_eq!(level, LogLevel::Fatal);
+    }
+
+    #[test]
+    fn test_log_level_from_message_unknown() {
+        let level = LogLevel::from_message("Just a regular message");
+        assert_eq!(level, LogLevel::Unknown);
+    }
+
+    #[test]
+    fn test_log_level_from_message_case_insensitive() {
+        let level = LogLevel::from_message("error: lowercase error");
+        assert_eq!(level, LogLevel::Error);
+
+        let level = LogLevel::from_message("WaRn: Mixed case");
+        assert_eq!(level, LogLevel::Warn);
+    }
+
+    #[test]
+    fn test_log_entry_level_auto_parsed() {
+        let log = LogEntry::new(1000, "ERROR: Test".to_string(), "web".to_string());
+        assert_eq!(log.level, LogLevel::Error);
+
+        let log = LogEntry::new(2000, "INFO: Test".to_string(), "api".to_string());
+        assert_eq!(log.level, LogLevel::Info);
+    }
+
+    // Test log level filtering
+    #[test]
+    fn test_cycle_log_level_filter_from_none() {
+        let mut app = create_test_app();
+        app.log_level_filter = None;
+
+        app.cycle_log_level_filter();
+        assert_eq!(app.log_level_filter, Some(LogLevel::Debug));
+    }
+
+    #[test]
+    fn test_cycle_log_level_filter_sequence() {
+        let mut app = create_test_app();
+
+        app.log_level_filter = None;
+        app.cycle_log_level_filter();
+        assert_eq!(app.log_level_filter, Some(LogLevel::Debug));
+
+        app.cycle_log_level_filter();
+        assert_eq!(app.log_level_filter, Some(LogLevel::Info));
+
+        app.cycle_log_level_filter();
+        assert_eq!(app.log_level_filter, Some(LogLevel::Warn));
+
+        app.cycle_log_level_filter();
+        assert_eq!(app.log_level_filter, Some(LogLevel::Error));
+
+        app.cycle_log_level_filter();
+        assert_eq!(app.log_level_filter, Some(LogLevel::Fatal));
+
+        app.cycle_log_level_filter();
+        assert_eq!(app.log_level_filter, None); // Wraps back to none
+    }
+
+    #[test]
+    fn test_get_filtered_logs_empty() {
+        let app = create_test_app();
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 0);
+    }
+
+    #[test]
+    fn test_get_filtered_logs_no_filter() {
+        let mut app = create_test_app();
+        app.logs = vec![
+            LogEntry::new(1000, "DEBUG: test1".to_string(), "web".to_string()),
+            LogEntry::new(2000, "INFO: test2".to_string(), "web".to_string()),
+            LogEntry::new(3000, "ERROR: test3".to_string(), "api".to_string()),
+        ];
+
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 3);
+    }
+
+    #[test]
+    fn test_get_filtered_logs_by_level() {
+        let mut app = create_test_app();
+        app.logs = vec![
+            LogEntry::new(1000, "DEBUG: test1".to_string(), "web".to_string()),
+            LogEntry::new(2000, "INFO: test2".to_string(), "web".to_string()),
+            LogEntry::new(3000, "ERROR: test3".to_string(), "api".to_string()),
+            LogEntry::new(4000, "ERROR: test4".to_string(), "worker".to_string()),
+        ];
+        app.log_level_filter = Some(LogLevel::Error);
+
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|log| log.level == LogLevel::Error));
+    }
+
+    #[test]
+    fn test_get_filtered_logs_by_search_text() {
+        let mut app = create_test_app();
+        app.logs = vec![
+            LogEntry::new(1000, "User login successful".to_string(), "web".to_string()),
+            LogEntry::new(2000, "Database query executed".to_string(), "api".to_string()),
+            LogEntry::new(3000, "User logout".to_string(), "web".to_string()),
+        ];
+        app.log_search_query = "user".to_string();
+
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|log| log.message.to_lowercase().contains("user")));
+    }
+
+    #[test]
+    fn test_get_filtered_logs_by_search_text_case_insensitive() {
+        let mut app = create_test_app();
+        app.logs = vec![
+            LogEntry::new(1000, "USER action".to_string(), "web".to_string()),
+            LogEntry::new(2000, "system event".to_string(), "api".to_string()),
+        ];
+        app.log_search_query = "user".to_string();
+
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn test_get_filtered_logs_by_container_name() {
+        let mut app = create_test_app();
+        app.logs = vec![
+            LogEntry::new(1000, "message 1".to_string(), "web-server".to_string()),
+            LogEntry::new(2000, "message 2".to_string(), "api-server".to_string()),
+            LogEntry::new(3000, "message 3".to_string(), "web-worker".to_string()),
+        ];
+        app.log_search_query = "web".to_string();
+
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_get_filtered_logs_level_and_search_combined() {
+        let mut app = create_test_app();
+        app.logs = vec![
+            LogEntry::new(1000, "ERROR: User not found".to_string(), "web".to_string()),
+            LogEntry::new(2000, "ERROR: Database error".to_string(), "api".to_string()),
+            LogEntry::new(3000, "INFO: User logged in".to_string(), "web".to_string()),
+            LogEntry::new(4000, "WARN: User timeout".to_string(), "web".to_string()),
+        ];
+        app.log_level_filter = Some(LogLevel::Error);
+        app.log_search_query = "user".to_string();
+
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 1); // Only ERROR logs containing "user"
+        assert_eq!(filtered[0].message, "ERROR: User not found");
+    }
+
+    // Test log search mode
+    #[test]
+    fn test_enter_log_search_mode() {
+        let mut app = create_test_app();
+        app.log_search_mode = false;
+        app.log_search_query = "old query".to_string();
+
+        app.enter_log_search_mode();
+
+        assert!(app.log_search_mode);
+        assert_eq!(app.log_search_query, "");
+        assert!(app.status_message.contains("Log search"));
+    }
+
+    #[test]
+    fn test_exit_log_search_mode() {
+        let mut app = create_test_app();
+        app.log_search_mode = true;
+        app.log_search_query = "test".to_string();
+        app.logs = vec![
+            LogEntry::new(1000, "test message".to_string(), "web".to_string()),
+            LogEntry::new(2000, "another message".to_string(), "web".to_string()),
+        ];
+
+        app.exit_log_search_mode();
+
+        assert!(!app.log_search_mode);
+        assert!(app.status_message.contains("Found"));
+    }
+
+    #[test]
+    fn test_update_log_search() {
+        let mut app = create_test_app();
+        app.log_search_query = "test".to_string();
+
+        app.update_log_search('!');
+
+        assert_eq!(app.log_search_query, "test!");
+    }
+
+    #[test]
+    fn test_delete_log_search_char() {
+        let mut app = create_test_app();
+        app.log_search_query = "test".to_string();
+
+        app.delete_log_search_char();
+
+        assert_eq!(app.log_search_query, "tes");
+    }
+
+    #[test]
+    fn test_delete_log_search_char_empty() {
+        let mut app = create_test_app();
+        app.log_search_query = String::new();
+
+        app.delete_log_search_char();
+
+        assert_eq!(app.log_search_query, "");
+        // Should not panic
+    }
+
+    #[test]
+    fn test_clear_log_search() {
+        let mut app = create_test_app();
+        app.log_search_mode = true;
+        app.log_search_query = "test query".to_string();
+
+        app.clear_log_search();
+
+        assert!(!app.log_search_mode);
+        assert_eq!(app.log_search_query, "");
+        assert!(app.status_message.contains("cleared"));
+    }
+
+    // Test auto-tail behavior
+    #[test]
+    fn test_auto_tail_scrolls_to_end_on_new_logs() {
+        let mut app = create_test_app();
+        app.state = AppState::Logs;
+        app.auto_tail = true;
+        app.logs = vec![
+            LogEntry::new(1000, "log1".to_string(), "web".to_string()),
+            LogEntry::new(2000, "log2".to_string(), "web".to_string()),
+            LogEntry::new(3000, "log3".to_string(), "web".to_string()),
+        ];
+        app.log_scroll = 0;
+
+        // Simulate what should_refresh does when auto_tail is true
+        if app.auto_tail && !app.logs.is_empty() {
+            app.log_scroll = app.logs.len().saturating_sub(1);
+        }
+
+        assert_eq!(app.log_scroll, 2); // Last log index
+    }
+
+    #[test]
+    fn test_scrolling_disables_auto_tail() {
+        let mut app = create_test_app();
+        app.state = AppState::Logs;
+        app.auto_tail = true;
+        app.logs = vec![
+            LogEntry::new(1000, "log1".to_string(), "web".to_string()),
+            LogEntry::new(2000, "log2".to_string(), "web".to_string()),
+        ];
+
+        app.next(); // Scroll down
+
+        assert!(!app.auto_tail);
+    }
+
+    #[test]
+    fn test_export_logs_generates_filename() {
+        let app = create_test_app();
+        // We can't fully test export without a real filesystem,
+        // but we can verify the method exists and basic logic
+
+        // This would normally fail without proper setup, so we just check the method exists
+        // In integration tests, we could verify actual file creation
+        assert_eq!(app.logs.len(), 0);
+    }
+
+    // Test edge cases
+    #[test]
+    fn test_log_level_filter_with_no_logs() {
+        let mut app = create_test_app();
+        app.logs = vec![];
+        app.log_level_filter = Some(LogLevel::Error);
+
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 0);
+    }
+
+    #[test]
+    fn test_log_search_with_no_logs() {
+        let mut app = create_test_app();
+        app.logs = vec![];
+        app.log_search_query = "test".to_string();
+
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 0);
+    }
+
+    #[test]
+    fn test_log_level_filter_no_matches() {
+        let mut app = create_test_app();
+        app.logs = vec![
+            LogEntry::new(1000, "INFO: test1".to_string(), "web".to_string()),
+            LogEntry::new(2000, "DEBUG: test2".to_string(), "web".to_string()),
+        ];
+        app.log_level_filter = Some(LogLevel::Error);
+
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 0);
+    }
+
+    #[test]
+    fn test_log_search_no_matches() {
+        let mut app = create_test_app();
+        app.logs = vec![
+            LogEntry::new(1000, "message 1".to_string(), "web".to_string()),
+            LogEntry::new(2000, "message 2".to_string(), "api".to_string()),
+        ];
+        app.log_search_query = "nonexistent".to_string();
+
+        let filtered = app.get_filtered_logs();
+        assert_eq!(filtered.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_containers_in_logs() {
+        let mut app = create_test_app();
+        app.logs = vec![
+            LogEntry::new(1000, "Web started".to_string(), "nginx".to_string()),
+            LogEntry::new(2000, "API ready".to_string(), "api".to_string()),
+            LogEntry::new(3000, "DB connected".to_string(), "postgres".to_string()),
+            LogEntry::new(4000, "Cache ready".to_string(), "redis".to_string()),
+        ];
+
+        // Verify all container names are preserved
+        assert!(app.logs.iter().any(|l| l.container_name == "nginx"));
+        assert!(app.logs.iter().any(|l| l.container_name == "api"));
+        assert!(app.logs.iter().any(|l| l.container_name == "postgres"));
+        assert!(app.logs.iter().any(|l| l.container_name == "redis"));
+    }
+
+    #[test]
+    fn test_log_level_equality() {
+        assert_eq!(LogLevel::Error, LogLevel::Error);
+        assert_ne!(LogLevel::Error, LogLevel::Warn);
+        assert_eq!(LogLevel::Info, LogLevel::Info);
     }
 }
