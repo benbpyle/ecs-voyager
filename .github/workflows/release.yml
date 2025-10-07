@@ -1,17 +1,73 @@
-name: Release and Update Homebrew
+name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches:
+      - master
+      - main
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
+  create-tag:
+    name: Create Release Tag
+    runs-on: ubuntu-latest
+    # Only run if CI succeeded
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      should_release: ${{ steps.check_skip.outputs.skip == 'false' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if should skip
+        id: check_skip
+        run: |
+          # Skip if commit message is a formula update
+          COMMIT_MSG=$(git log -1 --pretty=format:'%s')
+          if [[ "$COMMIT_MSG" == "chore: update Homebrew formula"* ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Skipping release - formula update commit"
+            exit 0
+          fi
+
+          # Skip if tag already exists
+          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.version.outputs.version }} already exists, skipping release"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.version.outputs.version }} does not exist, will create release"
+          fi
+
+      - name: Create and push tag
+        if: steps.check_skip.outputs.skip == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
   build-and-release:
     name: Build and Release
+    needs: create-tag
+    if: needs.create-tag.outputs.should_release == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -19,15 +75,17 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: ecs-voyager
-            asset_name: ecs-voyager-${{ github.ref_name }}-x86_64-apple-darwin
+            asset_name: ecs-voyager-${{ needs.create-tag.outputs.tag }}-x86_64-apple-darwin
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: ecs-voyager
-            asset_name: ecs-voyager-${{ github.ref_name }}-aarch64-apple-darwin
+            asset_name: ecs-voyager-${{ needs.create-tag.outputs.tag }}-aarch64-apple-darwin
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.tag }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -51,6 +109,7 @@ jobs:
       - name: Upload release archive
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ needs.create-tag.outputs.tag }}
           files: |
             target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz
             target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz.sha256
@@ -59,7 +118,7 @@ jobs:
 
   update-homebrew-formula:
     name: Update Homebrew Formula
-    needs: build-and-release
+    needs: [create-tag, build-and-release]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout tap repository
@@ -70,7 +129,7 @@ jobs:
 
       - name: Download release artifacts
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ needs.create-tag.outputs.tag }}"
 
           # Download both macOS archives
           curl -sL "https://github.com/benbpyle/ecs-voyager/releases/download/${VERSION}/ecs-voyager-${VERSION}-x86_64-apple-darwin.tar.gz" -o x86_64.tar.gz
