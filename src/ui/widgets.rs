@@ -5,7 +5,7 @@
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
@@ -21,6 +21,7 @@ use super::theme::Theme;
 /// * `area` - Optional area to render in (if None, renders centered modal)
 /// * `message` - Status message to display
 /// * `theme` - Theme for colors
+#[allow(dead_code)]
 pub fn render_spinner(f: &mut Frame, area: Option<Rect>, message: &str, theme: &Theme) {
     let target_area = area.unwrap_or_else(|| {
         let screen = f.area();
@@ -56,15 +57,13 @@ pub fn render_spinner(f: &mut Frame, area: Option<Rect>, message: &str, theme: &
         Line::from(""),
     ];
 
-    let widget = Paragraph::new(lines)
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .title("Loading")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.primary()))
-                .style(Style::default().bg(theme.background())),
-        );
+    let widget = Paragraph::new(lines).alignment(Alignment::Center).block(
+        Block::default()
+            .title("Loading")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.primary()))
+            .style(Style::default().bg(theme.background())),
+    );
 
     f.render_widget(widget, target_area);
 }
@@ -72,6 +71,7 @@ pub fn render_spinner(f: &mut Frame, area: Option<Rect>, message: &str, theme: &
 /// Returns the current frame of a spinner animation
 ///
 /// Uses a 10-frame Braille pattern spinner that updates every 80ms
+#[allow(dead_code)]
 pub fn get_spinner_frame() -> &'static str {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -91,13 +91,8 @@ pub fn get_spinner_frame() -> &'static str {
 /// * `progress` - Progress value (0.0 to 1.0)
 /// * `label` - Label text to display
 /// * `theme` - Theme for colors
-pub fn render_progress_bar(
-    f: &mut Frame,
-    area: Rect,
-    progress: f32,
-    label: &str,
-    theme: &Theme,
-) {
+#[allow(dead_code)]
+pub fn render_progress_bar(f: &mut Frame, area: Rect, progress: f32, label: &str, theme: &Theme) {
     let progress = progress.clamp(0.0, 1.0);
     let bar_width = (area.width.saturating_sub(4) as f32 * progress) as u16;
 
@@ -123,19 +118,18 @@ pub fn render_progress_bar(
         )]),
     ];
 
-    let widget = Paragraph::new(lines)
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border())),
-        );
+    let widget = Paragraph::new(lines).alignment(Alignment::Center).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border())),
+    );
 
     f.render_widget(widget, area);
 }
 
-/// Toast notification type
+/// Toast notification type (for future use)
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ToastType {
     Success,
     Error,
@@ -150,6 +144,7 @@ pub enum ToastType {
 /// * `message` - Message to display
 /// * `toast_type` - Type of toast (affects color)
 /// * `theme` - Theme for colors
+#[allow(dead_code)]
 pub fn render_toast(f: &mut Frame, message: &str, toast_type: ToastType, theme: &Theme) {
     let screen = f.area();
     let width = message.len().min(60) as u16 + 4;
@@ -179,14 +174,12 @@ pub fn render_toast(f: &mut Frame, message: &str, toast_type: ToastType, theme: 
         Span::styled(message, Style::default().fg(theme.foreground())),
     ]);
 
-    let widget = Paragraph::new(text)
-        .alignment(Alignment::Center)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(color))
-                .style(Style::default().bg(theme.background())),
-        );
+    let widget = Paragraph::new(text).alignment(Alignment::Center).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(color))
+            .style(Style::default().bg(theme.background())),
+    );
 
     f.render_widget(widget, area);
 }
@@ -199,6 +192,7 @@ pub fn render_toast(f: &mut Frame, message: &str, toast_type: ToastType, theme: 
 /// * `message` - Message to display
 /// * `confirm_selected` - Whether the confirm button is selected
 /// * `theme` - Theme for colors
+#[allow(dead_code)]
 pub fn render_confirmation_dialog(
     f: &mut Frame,
     title: &str,
@@ -220,7 +214,7 @@ pub fn render_confirmation_dialog(
     f.render_widget(Clear, area);
 
     // Split area for message and buttons
-    let chunks = Layout::default()
+    let _chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(3)])
         .split(area);
@@ -250,10 +244,7 @@ pub fn render_confirmation_dialog(
 
     let button_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(button_area);
 
     // Yes button
@@ -296,6 +287,7 @@ pub fn render_confirmation_dialog(
 /// * `value` - Current input value
 /// * `show_cursor` - Whether to show the cursor (for blinking effect)
 /// * `theme` - Theme for colors
+#[allow(dead_code)]
 pub fn render_input_field(
     f: &mut Frame,
     area: Rect,
@@ -311,7 +303,7 @@ pub fn render_input_field(
             " ".to_string()
         }
     } else if show_cursor {
-        format!("{}_", value)
+        format!("{value}_")
     } else {
         value.to_string()
     };
@@ -340,6 +332,7 @@ pub fn render_input_field(
 /// * `selected_index` - Currently selected item index
 /// * `current_value` - Current value (to mark with indicator)
 /// * `theme` - Theme for colors
+#[allow(dead_code)]
 pub fn render_dropdown<T: AsRef<str>>(
     f: &mut Frame,
     area: Rect,
@@ -390,8 +383,9 @@ pub fn render_dropdown<T: AsRef<str>>(
     f.render_widget(widget, area);
 }
 
-/// Multi-select checkbox item state
+/// Multi-select checkbox item state (for future use)
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct CheckboxItem {
     pub label: String,
     pub checked: bool,
@@ -406,6 +400,7 @@ pub struct CheckboxItem {
 /// * `items` - List of checkbox items
 /// * `selected_index` - Currently selected item index
 /// * `theme` - Theme for colors
+#[allow(dead_code)]
 pub fn render_checkbox_list(
     f: &mut Frame,
     area: Rect,
@@ -436,7 +431,9 @@ pub fn render_checkbox_list(
 
     let widget = List::new(list_items).block(
         Block::default()
-            .title(format!("{title} (↑↓:navigate | Space:toggle | Enter:confirm)"))
+            .title(format!(
+                "{title} (↑↓:navigate | Space:toggle | Enter:confirm)"
+            ))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.primary()))
             .style(Style::default().bg(theme.background())),

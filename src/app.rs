@@ -59,9 +59,11 @@ pub struct App {
     pub ecs_client: EcsClient,
     /// Application configuration
     pub config: Config,
-    /// UI theme
+    /// UI theme (for future use)
+    #[allow(dead_code)]
     pub theme: Theme,
-    /// Whether split-pane view is enabled
+    /// Whether split-pane view is enabled (for future use)
+    #[allow(dead_code)]
     pub split_pane_mode: bool,
 
     // AWS Context
@@ -367,11 +369,17 @@ impl App {
         self.details_scroll = 0; // Reset scroll when toggling views
     }
 
+    /// Toggle split-pane view mode (for future use)
+    #[allow(dead_code)]
     pub fn toggle_split_pane(&mut self) {
         self.split_pane_mode = !self.split_pane_mode;
         self.status_message = format!(
             "Split-pane mode {}",
-            if self.split_pane_mode { "enabled" } else { "disabled" }
+            if self.split_pane_mode {
+                "enabled"
+            } else {
+                "disabled"
+            }
         );
     }
 
@@ -482,14 +490,16 @@ impl App {
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
                         self.status_message = "Loading task details...".to_string();
-                        let (formatted, json) = self.ecs_client
+                        let (formatted, json) = self
+                            .ecs_client
                             .describe_task(cluster, &task.task_arn)
                             .await?;
                         self.details = Some(formatted);
                         self.details_json = Some(json);
                         self.loading = false;
                         self.set_view(AppState::Details);
-                        self.status_message = "Task details loaded (Press 'J' for JSON view)".to_string();
+                        self.status_message =
+                            "Task details loaded (Press 'J' for JSON view)".to_string();
                     }
                 }
             }
@@ -612,11 +622,13 @@ impl App {
                 {
                     self.status_message = "Refreshing metrics...".to_string();
                     // Use current time range from metrics or default from config
-                    let time_range = self
-                        .metrics
-                        .as_ref()
-                        .map(|m| m.time_range)
-                        .unwrap_or_else(|| TimeRange::from_minutes(self.config.metrics.time_range_minutes));
+                    let time_range =
+                        self.metrics
+                            .as_ref()
+                            .map(|m| m.time_range)
+                            .unwrap_or_else(|| {
+                                TimeRange::from_minutes(self.config.metrics.time_range_minutes)
+                            });
 
                     match self
                         .ecs_client
@@ -648,14 +660,16 @@ impl App {
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
                         self.status_message = format!("Describing service: {}", service.name);
-                        let (formatted, json) = self.ecs_client
+                        let (formatted, json) = self
+                            .ecs_client
                             .describe_service(cluster, &service.name)
                             .await?;
                         self.details = Some(formatted);
                         self.details_json = Some(json);
                         self.loading = false;
                         self.set_view(AppState::Details);
-                        self.status_message = "Service details loaded (Press 'j' for JSON view)".to_string();
+                        self.status_message =
+                            "Service details loaded (Press 'j' for JSON view)".to_string();
                     }
                 }
             }
@@ -664,14 +678,16 @@ impl App {
                     if let Some(cluster) = &self.selected_cluster {
                         self.loading = true;
                         self.status_message = "Describing task...".to_string();
-                        let (formatted, json) = self.ecs_client
+                        let (formatted, json) = self
+                            .ecs_client
                             .describe_task(cluster, &task.task_arn)
                             .await?;
                         self.details = Some(formatted);
                         self.details_json = Some(json);
                         self.loading = false;
                         self.set_view(AppState::Details);
-                        self.status_message = "Task details loaded (Press 'j' for JSON view)".to_string();
+                        self.status_message =
+                            "Task details loaded (Press 'j' for JSON view)".to_string();
                     }
                 }
             }
@@ -977,7 +993,8 @@ impl App {
                     self.loading = true;
                     self.status_message = format!("Loading metrics for service: {service_name}");
 
-                    let time_range = TimeRange::from_minutes(self.config.metrics.time_range_minutes);
+                    let time_range =
+                        TimeRange::from_minutes(self.config.metrics.time_range_minutes);
                     self.metrics = self
                         .ecs_client
                         .get_service_metrics(&cluster_name, &service_name, time_range)
@@ -1009,7 +1026,8 @@ impl App {
                 let service_name = metrics.service_name.clone();
 
                 self.loading = true;
-                self.status_message = format!("Switching to {} time range...", new_time_range.label());
+                self.status_message =
+                    format!("Switching to {} time range...", new_time_range.label());
 
                 match self
                     .ecs_client
@@ -1018,7 +1036,8 @@ impl App {
                 {
                     Ok(new_metrics) => {
                         self.metrics = Some(new_metrics);
-                        self.status_message = format!("Metrics time range: {}", new_time_range.label());
+                        self.status_message =
+                            format!("Metrics time range: {}", new_time_range.label());
                     }
                     Err(e) => {
                         self.status_message = format!("Error loading metrics: {e}");
@@ -2170,14 +2189,20 @@ mod tests {
         let mut app = create_test_app();
         app.logs = vec![
             LogEntry::new(1000, "User login successful".to_string(), "web".to_string()),
-            LogEntry::new(2000, "Database query executed".to_string(), "api".to_string()),
+            LogEntry::new(
+                2000,
+                "Database query executed".to_string(),
+                "api".to_string(),
+            ),
             LogEntry::new(3000, "User logout".to_string(), "web".to_string()),
         ];
         app.log_search_query = "user".to_string();
 
         let filtered = app.get_filtered_logs();
         assert_eq!(filtered.len(), 2);
-        assert!(filtered.iter().all(|log| log.message.to_lowercase().contains("user")));
+        assert!(filtered
+            .iter()
+            .all(|log| log.message.to_lowercase().contains("user")));
     }
 
     #[test]

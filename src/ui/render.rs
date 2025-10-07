@@ -553,15 +553,11 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App) {
         (app.details.as_ref().unwrap_or(&default_text), "Formatted")
     };
 
-    let title = format!("Details - {} View (↑↓:scroll | J:toggle | Esc/h:back)", view_type);
+    let title = format!("Details - {view_type} View (↑↓:scroll | J:toggle | Esc/h:back)");
 
     let paragraph = Paragraph::new(content.as_str())
         .style(Style::default().fg(Color::White))
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL),
-        )
+        .block(Block::default().title(title).borders(Borders::ALL))
         .wrap(Wrap { trim: false })
         .scroll((app.details_scroll as u16, 0));
 
@@ -752,17 +748,19 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
         let cpu_chart_datapoints: Vec<ChartDatapoint> = metrics
             .cpu_datapoints
             .iter()
-            .filter_map(|dp| dp.average.map(|avg| ChartDatapoint {
-                timestamp: dp.timestamp,
-                value: avg,
-            }))
+            .filter_map(|dp| {
+                dp.average.map(|avg| ChartDatapoint {
+                    timestamp: dp.timestamp,
+                    value: avg,
+                })
+            })
             .collect();
 
         let chart_config = ChartConfig {
             width: 60,
             height: 10,
-            min_value: None,  // Auto-scale based on data
-            max_value: None,  // Auto-scale based on data
+            min_value: None, // Auto-scale based on data
+            max_value: None, // Auto-scale based on data
             line_color: Color::Green,
             show_y_labels: true,
         };
@@ -788,7 +786,11 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
             .iter()
             .filter_map(|dp| dp.average)
             .sum::<f64>()
-            / metrics.cpu_datapoints.iter().filter(|dp| dp.average.is_some()).count() as f64;
+            / metrics
+                .cpu_datapoints
+                .iter()
+                .filter(|dp| dp.average.is_some())
+                .count() as f64;
         let max_cpu = metrics
             .cpu_datapoints
             .iter()
@@ -822,23 +824,29 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
         let mem_chart_datapoints: Vec<ChartDatapoint> = metrics
             .memory_datapoints
             .iter()
-            .filter_map(|dp| dp.average.map(|avg| ChartDatapoint {
-                timestamp: dp.timestamp,
-                value: avg,
-            }))
+            .filter_map(|dp| {
+                dp.average.map(|avg| ChartDatapoint {
+                    timestamp: dp.timestamp,
+                    value: avg,
+                })
+            })
             .collect();
 
         if !mem_chart_datapoints.is_empty() {
             let chart_config = ChartConfig {
                 width: 60,
                 height: 10,
-                min_value: None,  // Auto-scale based on data
-                max_value: None,  // Auto-scale based on data
+                min_value: None, // Auto-scale based on data
+                max_value: None, // Auto-scale based on data
                 line_color: Color::Cyan,
                 show_y_labels: true,
             };
 
-            let chart_lines = render_chart(&mem_chart_datapoints, &chart_config, "Memory Utilization (%)");
+            let chart_lines = render_chart(
+                &mem_chart_datapoints,
+                &chart_config,
+                "Memory Utilization (%)",
+            );
             content_lines.extend(chart_lines);
         } else {
             content_lines.push(Line::from(Span::styled(
@@ -871,7 +879,11 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
             .iter()
             .filter_map(|dp| dp.average)
             .sum::<f64>()
-            / metrics.memory_datapoints.iter().filter(|dp| dp.average.is_some()).count() as f64;
+            / metrics
+                .memory_datapoints
+                .iter()
+                .filter(|dp| dp.average.is_some())
+                .count() as f64;
         let max_mem = metrics
             .memory_datapoints
             .iter()
@@ -903,8 +915,7 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
         .block(
             Block::default()
                 .title(format!(
-                    "Metrics [{}] (T:cycle range | r:refresh | Esc/h:back | ↑↓:scroll)",
-                    time_range_label
+                    "Metrics [{time_range_label}] (T:cycle range | r:refresh | Esc/h:back | ↑↓:scroll)"
                 ))
                 .borders(Borders::ALL),
         )
@@ -950,7 +961,10 @@ fn draw_alarms_section(f: &mut Frame, area: Rect, metrics: &crate::aws::Metrics)
         };
 
         alarm_lines.push(Line::from(vec![
-            Span::styled(format!("  {state_symbol} "), Style::default().fg(state_color)),
+            Span::styled(
+                format!("  {state_symbol} "),
+                Style::default().fg(state_color),
+            ),
             Span::styled(&alarm.name, Style::default().fg(Color::White)),
             Span::styled(" [", Style::default().fg(Color::DarkGray)),
             Span::styled(&alarm.state, Style::default().fg(state_color)),

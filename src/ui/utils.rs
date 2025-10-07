@@ -20,8 +20,7 @@ pub const MIN_TERMINAL_HEIGHT: u16 = 24;
 pub fn validate_terminal_size(width: u16, height: u16) -> Result<(), String> {
     if width < MIN_TERMINAL_WIDTH || height < MIN_TERMINAL_HEIGHT {
         Err(format!(
-            "Terminal too small! Minimum size: {}x{}, Current: {}x{}",
-            MIN_TERMINAL_WIDTH, MIN_TERMINAL_HEIGHT, width, height
+            "Terminal too small! Minimum size: {MIN_TERMINAL_WIDTH}x{MIN_TERMINAL_HEIGHT}, Current: {width}x{height}"
         ))
     } else {
         Ok(())
@@ -44,6 +43,7 @@ pub fn validate_terminal_size(width: u16, height: u16) -> Result<(), String> {
 /// assert_eq!(truncate_text("Hello, World!", 10), "Hello, ...");
 /// assert_eq!(truncate_text("Short", 10), "Short");
 /// ```
+#[allow(dead_code)]
 pub fn truncate_text(text: &str, max_width: usize) -> String {
     if text.len() <= max_width {
         text.to_string()
@@ -51,7 +51,7 @@ pub fn truncate_text(text: &str, max_width: usize) -> String {
         "...".to_string()
     } else {
         let truncated = &text[..max_width.saturating_sub(3)];
-        format!("{}...", truncated)
+        format!("{truncated}...")
     }
 }
 
@@ -69,6 +69,7 @@ pub fn truncate_text(text: &str, max_width: usize) -> String {
 ///
 /// assert_eq!(truncate_middle("arn:aws:ecs:us-east-1:123456:task/abc123", 20), "arn:aws:e...sk/abc123");
 /// ```
+#[allow(dead_code)]
 pub fn truncate_middle(text: &str, max_width: usize) -> String {
     if text.len() <= max_width {
         text.to_string()
@@ -83,7 +84,7 @@ pub fn truncate_middle(text: &str, max_width: usize) -> String {
         let start = &text[..start_len];
         let end = &text[text.len().saturating_sub(end_len)..];
 
-        format!("{}{}{}", start, ellipsis, end)
+        format!("{start}{ellipsis}{end}")
     }
 }
 
@@ -95,6 +96,7 @@ pub fn truncate_middle(text: &str, max_width: usize) -> String {
 ///
 /// # Returns
 /// Vector of wrapped lines
+#[allow(dead_code)]
 pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![];
@@ -169,16 +171,17 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 ///
 /// # Returns
 /// Vector of lines with line numbers prepended
+#[allow(dead_code)]
 pub fn add_line_numbers(lines: &[String], start_number: usize) -> Vec<String> {
     let max_line_num = start_number + lines.len().saturating_sub(1);
-    let width = format!("{}", max_line_num).len();
+    let width = format!("{max_line_num}").len();
 
     lines
         .iter()
         .enumerate()
         .map(|(i, line)| {
             let line_num = start_number + i;
-            format!("{:>width$} | {}", line_num, line, width = width)
+            format!("{line_num:>width$} | {line}")
         })
         .collect()
 }
@@ -192,6 +195,7 @@ pub fn add_line_numbers(lines: &[String], start_number: usize) -> Vec<String> {
 ///
 /// # Returns
 /// A centered Rect within the parent
+#[allow(dead_code)]
 pub fn centered_rect(parent: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(parent.width);
     let height = height.min(parent.height);
@@ -211,6 +215,7 @@ pub fn centered_rect(parent: Rect, width: u16, height: u16) -> Rect {
 ///
 /// # Returns
 /// Tuple of (left_pane, right_pane) Rect areas
+#[allow(dead_code)]
 pub fn split_pane_layout(area: Rect) -> (Rect, Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -229,7 +234,12 @@ pub fn split_pane_layout(area: Rect) -> (Rect, Rect) {
 ///
 /// # Returns
 /// Tuple of (left, center, right) Rect areas
-pub fn three_column_layout(area: Rect, left_percent: u16, right_percent: u16) -> (Rect, Rect, Rect) {
+#[allow(dead_code)]
+pub fn three_column_layout(
+    area: Rect,
+    left_percent: u16,
+    right_percent: u16,
+) -> (Rect, Rect, Rect) {
     let left = left_percent.min(100);
     let right = right_percent.min(100);
     let center = 100u16.saturating_sub(left).saturating_sub(right);
@@ -256,25 +266,20 @@ pub fn three_column_layout(area: Rect, left_percent: u16, right_percent: u16) ->
 ///
 /// # Returns
 /// Adjusted column widths
+#[allow(dead_code)]
 pub fn responsive_column_widths(terminal_width: u16, full_widths: &[u16]) -> Vec<u16> {
     if terminal_width >= 120 {
         // Full size
         full_widths.to_vec()
     } else if terminal_width >= 100 {
         // Slightly compressed
-        full_widths
-            .iter()
-            .map(|w| (w * 90) / 100)
-            .collect()
+        full_widths.iter().map(|w| (w * 90) / 100).collect()
     } else {
         // Highly compressed - drop last column if possible
         if full_widths.len() > 3 {
             full_widths[..full_widths.len() - 1].to_vec()
         } else {
-            full_widths
-                .iter()
-                .map(|w| (w * 80) / 100)
-                .collect()
+            full_widths.iter().map(|w| (w * 80) / 100).collect()
         }
     }
 }

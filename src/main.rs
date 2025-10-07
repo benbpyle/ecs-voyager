@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
             DisableMouseCapture
         )?;
         terminal.show_cursor()?;
-        eprintln!("{}", msg);
+        eprintln!("{msg}");
         std::process::exit(1);
     }
 

@@ -47,13 +47,15 @@ pub struct MetricDatapoint {
 pub struct CloudWatchAlarm {
     /// Alarm name
     pub name: String,
-    /// Alarm description
+    /// Alarm description (for future use)
+    #[allow(dead_code)]
     pub description: Option<String>,
     /// Current state (OK, ALARM, INSUFFICIENT_DATA)
     pub state: String,
     /// State reason (why alarm is in this state)
     pub state_reason: Option<String>,
-    /// Metric name this alarm monitors
+    /// Metric name this alarm monitors (for future use)
+    #[allow(dead_code)]
     pub metric_name: String,
 }
 
@@ -399,9 +401,18 @@ impl EcsClient {
             if !deployments.is_empty() {
                 output.push_str("\nDeployments:\n");
                 for deployment in deployments {
-                    output.push_str(&format!("  - Status: {}\n", deployment.status().unwrap_or("N/A")));
-                    output.push_str(&format!("    Running Count: {}\n", deployment.running_count()));
-                    output.push_str(&format!("    Desired Count: {}\n", deployment.desired_count()));
+                    output.push_str(&format!(
+                        "  - Status: {}\n",
+                        deployment.status().unwrap_or("N/A")
+                    ));
+                    output.push_str(&format!(
+                        "    Running Count: {}\n",
+                        deployment.running_count()
+                    ));
+                    output.push_str(&format!(
+                        "    Desired Count: {}\n",
+                        deployment.desired_count()
+                    ));
                 }
             }
 
@@ -410,8 +421,13 @@ impl EcsClient {
                 output.push_str("\nNetwork Configuration:\n");
                 if let Some(awsvpc) = network_config.awsvpc_configuration() {
                     output.push_str(&format!("  Subnets: {}\n", awsvpc.subnets().join(", ")));
-                    output.push_str(&format!("  Assign Public IP: {}\n",
-                        awsvpc.assign_public_ip().map(|ip| ip.as_str()).unwrap_or("N/A")));
+                    output.push_str(&format!(
+                        "  Assign Public IP: {}\n",
+                        awsvpc
+                            .assign_public_ip()
+                            .map(|ip| ip.as_str())
+                            .unwrap_or("N/A")
+                    ));
                     let sgs = awsvpc.security_groups();
                     if !sgs.is_empty() {
                         output.push_str(&format!("  Security Groups: {}\n", sgs.join(", ")));
@@ -422,7 +438,8 @@ impl EcsClient {
             output.push('\n');
 
             // Build JSON representation
-            json_parts.push(format!(r#"{{
+            json_parts.push(format!(
+                r#"{{
   "serviceName": "{}",
   "serviceArn": "{}",
   "status": "{}",
@@ -521,8 +538,12 @@ impl EcsClient {
                 }
 
                 // Build container JSON
-                let exit_code_json = container.exit_code().map(|ec| format!(r#", "exitCode": {ec}"#)).unwrap_or_default();
-                container_jsons.push(format!(r#"{{
+                let exit_code_json = container
+                    .exit_code()
+                    .map(|ec| format!(r#", "exitCode": {ec}"#))
+                    .unwrap_or_default();
+                container_jsons.push(format!(
+                    r#"{{
       "name": "{}",
       "image": "{}",
       "lastStatus": "{}"{exit_code_json}
@@ -535,7 +556,8 @@ impl EcsClient {
             output.push('\n');
 
             // Build task JSON
-            json_parts.push(format!(r#"{{
+            json_parts.push(format!(
+                r#"{{
   "taskArn": "{}",
   "taskDefinitionArn": "{}",
   "lastStatus": "{}",
@@ -792,11 +814,7 @@ impl EcsClient {
         service_name: &str,
     ) -> Result<Vec<CloudWatchAlarm>> {
         // Describe alarms for this service
-        let response = self
-            .metrics_client
-            .describe_alarms()
-            .send()
-            .await?;
+        let response = self.metrics_client.describe_alarms().send().await?;
 
         let mut alarms = Vec::new();
 
@@ -809,13 +827,12 @@ impl EcsClient {
                     if let Some(metric) = metric_data.metric_stat() {
                         if let Some(metric_obj) = metric.metric() {
                             // Check if this is an ECS metric for our service
-                            let is_ecs_service_metric = metric_obj
-                                .dimensions()
-                                .iter()
-                                .any(|dim| {
-                                    (dim.name() == Some("ServiceName") && dim.value() == Some(service_name))
-                                        || (dim.name() == Some("ClusterName") && dim.value() == Some(cluster_name))
-                                });
+                            let is_ecs_service_metric = metric_obj.dimensions().iter().any(|dim| {
+                                (dim.name() == Some("ServiceName")
+                                    && dim.value() == Some(service_name))
+                                    || (dim.name() == Some("ClusterName")
+                                        && dim.value() == Some(cluster_name))
+                            });
 
                             if is_ecs_service_metric {
                                 alarms.push(CloudWatchAlarm {
@@ -826,7 +843,10 @@ impl EcsClient {
                                         .map(|s| s.as_str().to_string())
                                         .unwrap_or_else(|| "UNKNOWN".to_string()),
                                     state_reason: alarm.state_reason().map(|s| s.to_string()),
-                                    metric_name: metric_obj.metric_name().unwrap_or("Unknown").to_string(),
+                                    metric_name: metric_obj
+                                        .metric_name()
+                                        .unwrap_or("Unknown")
+                                        .to_string(),
                                 });
                                 break;
                             }
@@ -837,6 +857,17 @@ impl EcsClient {
         }
 
         Ok(alarms)
+    }
+
+    /// Helper function to create a CloudWatch Dimension with required name and value.
+    ///
+    /// Both name and value are required by the CloudWatch API, even though the SDK
+    /// allows them to be optional. This helper ensures they are always set.
+    fn create_dimension(name: &str, value: &str) -> aws_sdk_cloudwatch::types::Dimension {
+        aws_sdk_cloudwatch::types::Dimension::builder()
+            .name(name)
+            .value(value)
+            .build()
     }
 
     /// Fetches CloudWatch metrics for an ECS service.
@@ -856,17 +887,6 @@ impl EcsClient {
     /// This function will return an error if:
     /// - The AWS GetMetricStatistics API call fails
     /// - Insufficient permissions to read metrics
-    /// Helper function to create a CloudWatch Dimension with required name and value.
-    ///
-    /// Both name and value are required by the CloudWatch API, even though the SDK
-    /// allows them to be optional. This helper ensures they are always set.
-    fn create_dimension(name: &str, value: &str) -> aws_sdk_cloudwatch::types::Dimension {
-        aws_sdk_cloudwatch::types::Dimension::builder()
-            .name(name)
-            .value(value)
-            .build()
-    }
-
     pub async fn get_service_metrics(
         &self,
         cluster_name: &str,
@@ -892,8 +912,7 @@ impl EcsClient {
         let start_time = end_time - (time_range_minutes as i64 * 60);
 
         eprintln!(
-            "Fetching metrics for service: {} in cluster: {} (time range: {} minutes)",
-            service_name, cluster_name, time_range_minutes
+            "Fetching metrics for service: {service_name} in cluster: {cluster_name} (time range: {time_range_minutes} minutes)"
         );
 
         // Create dimensions once (both metrics use the same dimensions)

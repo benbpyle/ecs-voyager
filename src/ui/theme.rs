@@ -7,18 +7,13 @@ use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
 
 /// Available theme presets
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ThemePreset {
+    #[default]
     Dark,
     Light,
     Custom,
-}
-
-impl Default for ThemePreset {
-    fn default() -> Self {
-        ThemePreset::Dark
-    }
 }
 
 /// Complete color theme definition
@@ -89,18 +84,42 @@ pub struct ThemeColors {
 }
 
 // Default color functions for dark theme
-fn default_primary() -> String { "cyan".to_string() }
-fn default_secondary() -> String { "magenta".to_string() }
-fn default_background() -> String { "black".to_string() }
-fn default_foreground() -> String { "white".to_string() }
-fn default_success() -> String { "green".to_string() }
-fn default_warning() -> String { "yellow".to_string() }
-fn default_error() -> String { "red".to_string() }
-fn default_info() -> String { "blue".to_string() }
-fn default_border() -> String { "white".to_string() }
-fn default_muted() -> String { "darkgray".to_string() }
-fn default_highlight_bg() -> String { "cyan".to_string() }
-fn default_highlight_fg() -> String { "black".to_string() }
+fn default_primary() -> String {
+    "cyan".to_string()
+}
+fn default_secondary() -> String {
+    "magenta".to_string()
+}
+fn default_background() -> String {
+    "black".to_string()
+}
+fn default_foreground() -> String {
+    "white".to_string()
+}
+fn default_success() -> String {
+    "green".to_string()
+}
+fn default_warning() -> String {
+    "yellow".to_string()
+}
+fn default_error() -> String {
+    "red".to_string()
+}
+fn default_info() -> String {
+    "blue".to_string()
+}
+fn default_border() -> String {
+    "white".to_string()
+}
+fn default_muted() -> String {
+    "darkgray".to_string()
+}
+fn default_highlight_bg() -> String {
+    "cyan".to_string()
+}
+fn default_highlight_fg() -> String {
+    "black".to_string()
+}
 
 impl Default for ThemeColors {
     fn default() -> Self {
@@ -145,9 +164,10 @@ impl ThemeColors {
         }
     }
 
-    /// Parses a color string into a ratatui Color
+    /// Parses a color string into a ratatui Color (for future use)
     ///
     /// Supports named colors (red, green, blue, etc.) and hex colors (#RRGGBB)
+    #[allow(dead_code)]
     pub fn parse_color(color_str: &str) -> Color {
         match color_str.to_lowercase().as_str() {
             "black" => Color::Black,
@@ -203,62 +223,74 @@ impl Theme {
         Self { preset, colors }
     }
 
-    /// Gets the primary color as a ratatui Color
+    /// Gets the primary color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn primary(&self) -> Color {
         ThemeColors::parse_color(&self.colors.primary)
     }
 
-    /// Gets the secondary color as a ratatui Color
+    /// Gets the secondary color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn secondary(&self) -> Color {
         ThemeColors::parse_color(&self.colors.secondary)
     }
 
-    /// Gets the background color as a ratatui Color
+    /// Gets the background color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn background(&self) -> Color {
         ThemeColors::parse_color(&self.colors.background)
     }
 
-    /// Gets the foreground color as a ratatui Color
+    /// Gets the foreground color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn foreground(&self) -> Color {
         ThemeColors::parse_color(&self.colors.foreground)
     }
 
-    /// Gets the success color as a ratatui Color
+    /// Gets the success color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn success(&self) -> Color {
         ThemeColors::parse_color(&self.colors.success)
     }
 
-    /// Gets the warning color as a ratatui Color
+    /// Gets the warning color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn warning(&self) -> Color {
         ThemeColors::parse_color(&self.colors.warning)
     }
 
-    /// Gets the error color as a ratatui Color
+    /// Gets the error color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn error(&self) -> Color {
         ThemeColors::parse_color(&self.colors.error)
     }
 
-    /// Gets the info color as a ratatui Color
+    /// Gets the info color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn info(&self) -> Color {
         ThemeColors::parse_color(&self.colors.info)
     }
 
-    /// Gets the border color as a ratatui Color
+    /// Gets the border color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn border(&self) -> Color {
         ThemeColors::parse_color(&self.colors.border)
     }
 
-    /// Gets the muted color as a ratatui Color
+    /// Gets the muted color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn muted(&self) -> Color {
         ThemeColors::parse_color(&self.colors.muted)
     }
 
-    /// Gets the highlight background color as a ratatui Color
+    /// Gets the highlight background color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn highlight_bg(&self) -> Color {
         ThemeColors::parse_color(&self.colors.highlight_bg)
     }
 
-    /// Gets the highlight foreground color as a ratatui Color
+    /// Gets the highlight foreground color as a ratatui Color (for future use)
+    #[allow(dead_code)]
     pub fn highlight_fg(&self) -> Color {
         ThemeColors::parse_color(&self.colors.highlight_fg)
     }
@@ -313,7 +345,10 @@ mod tests {
         assert_eq!(ThemeColors::parse_color("#FF0000"), Color::Rgb(255, 0, 0));
         assert_eq!(ThemeColors::parse_color("#00FF00"), Color::Rgb(0, 255, 0));
         assert_eq!(ThemeColors::parse_color("#0000FF"), Color::Rgb(0, 0, 255));
-        assert_eq!(ThemeColors::parse_color("#FFFFFF"), Color::Rgb(255, 255, 255));
+        assert_eq!(
+            ThemeColors::parse_color("#FFFFFF"),
+            Color::Rgb(255, 255, 255)
+        );
         assert_eq!(ThemeColors::parse_color("#000000"), Color::Rgb(0, 0, 0));
     }
 

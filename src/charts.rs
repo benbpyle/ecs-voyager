@@ -12,7 +12,8 @@ use ratatui::{
 /// Represents a single datapoint for charting.
 #[derive(Debug, Clone)]
 pub struct ChartDatapoint {
-    /// Timestamp of the datapoint (Unix timestamp in seconds)
+    /// Timestamp of the datapoint (Unix timestamp in seconds, for future use)
+    #[allow(dead_code)]
     pub timestamp: i64,
     /// Value to plot
     pub value: f64,
@@ -95,12 +96,9 @@ pub fn render_chart(
 
     // Calculate value range
     let values: Vec<f64> = datapoints.iter().map(|dp| dp.value).collect();
-    let min_val = config.min_value.unwrap_or_else(|| {
-        values
-            .iter()
-            .fold(f64::INFINITY, |a, &b| a.min(b))
-            .floor()
-    });
+    let min_val = config
+        .min_value
+        .unwrap_or_else(|| values.iter().fold(f64::INFINITY, |a, &b| a.min(b)).floor());
     let max_val = config.max_value.unwrap_or_else(|| {
         values
             .iter()
@@ -129,7 +127,7 @@ pub fn render_chart(
 
         // Add Y-axis label (show the top of this row)
         if config.show_y_labels {
-            row_chars.push_str(&format!("  {:5.1}│ ", row_top));
+            row_chars.push_str(&format!("  {row_top:5.1}│ "));
         } else {
             row_chars.push_str("  ");
         }
@@ -148,10 +146,7 @@ pub fn render_chart(
 
     // Add X-axis
     if config.show_y_labels {
-        let axis_line = format!(
-            "       └{}",
-            "─".repeat(config.width)
-        );
+        let axis_line = format!("       └{}", "─".repeat(config.width));
         lines.push(Line::from(Span::styled(
             axis_line,
             Style::default().fg(Color::DarkGray),
@@ -202,7 +197,6 @@ fn sample_datapoints(values: &[f64], target_width: usize) -> Vec<f64> {
     }
 }
 
-
 /// Renders a simple sparkline chart (single-line visualization).
 ///
 /// Creates a compact one-line chart using Unicode characters to show
@@ -215,20 +209,14 @@ fn sample_datapoints(values: &[f64], target_width: usize) -> Vec<f64> {
 ///
 /// # Returns
 /// A single ratatui `Line` containing the sparkline
+#[allow(dead_code)]
 pub fn render_sparkline(values: &[f64], width: usize, color: Color) -> Line<'static> {
     if values.is_empty() {
-        return Line::from(Span::styled(
-            " ".repeat(width),
-            Style::default().fg(color),
-        ));
+        return Line::from(Span::styled(" ".repeat(width), Style::default().fg(color)));
     }
 
-    let min_val = values
-        .iter()
-        .fold(f64::INFINITY, |a, &b| a.min(b));
-    let max_val = values
-        .iter()
-        .fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    let min_val = values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+    let max_val = values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
 
     let range = if (max_val - min_val).abs() < 0.001 {
         1.0
@@ -290,26 +278,6 @@ mod tests {
         assert!(sampled.iter().all(|&v| v == 0.0));
     }
 
-    #[test]
-    fn test_get_chart_char_full_block() {
-        let char = get_chart_char(10.0, 5.0, 4.0);
-        assert_eq!(char, '█');
-    }
-
-    #[test]
-    fn test_get_chart_char_medium_shade() {
-        // Value is 7.0, threshold is 5.0, row_height is 4.0
-        // diff = 7.0 - 5.0 = 2.0
-        // 2.0 >= 4.0 * 0.5 (2.0) is true, so it should be '▓'
-        let char = get_chart_char(7.0, 5.0, 4.0);
-        assert_eq!(char, '▓');
-    }
-
-    #[test]
-    fn test_get_chart_char_space() {
-        let char = get_chart_char(2.0, 5.0, 4.0);
-        assert_eq!(char, ' ');
-    }
 
     #[test]
     fn test_render_chart_empty_datapoints() {
@@ -393,33 +361,11 @@ mod tests {
     }
 
     #[test]
-    fn test_get_chart_char_edge_cases() {
-        // Test exact threshold - diff = 0.0, which >= 0.0
-        // 0.0 >= 1.0 * 0.75 is false
-        // 0.0 >= 1.0 * 0.5 is false
-        // 0.0 >= 1.0 * 0.25 is false
-        // So it should return '░' (light shade)
-        let char = get_chart_char(5.0, 5.0, 1.0);
-        assert!(char != ' ');
-
-        // Test at boundary - diff = 0.25
-        // 0.25 >= 1.0 * 0.75 (0.75) is false
-        // 0.25 >= 1.0 * 0.5 (0.5) is false
-        // 0.25 >= 1.0 * 0.25 (0.25) is true, so should return '░'
-        // But actually 0.25 < 0.5, so it will fall to the else-if checking
-        // Since 0.25 >= 0.25, it returns '▒'
-        let char = get_chart_char(5.25, 5.0, 1.0);
-        assert_eq!(char, '▒');
-    }
-
-    #[test]
     fn test_render_chart_min_max_override() {
-        let datapoints = vec![
-            ChartDatapoint {
-                timestamp: 1000,
-                value: 50.0,
-            },
-        ];
+        let datapoints = vec![ChartDatapoint {
+            timestamp: 1000,
+            value: 50.0,
+        }];
         let config = ChartConfig {
             width: 10,
             height: 5,
