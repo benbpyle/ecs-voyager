@@ -295,28 +295,57 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
             "OFF".to_string()
         };
 
-        let line3 = Line::from(vec![
+        // Build filter status string
+        let mut filter_parts = Vec::new();
+        if let Some(ref status) = app.service_status_filter {
+            filter_parts.push(format!("Status:{status}"));
+        }
+        if let Some(ref lt) = app.launch_type_filter {
+            filter_parts.push(format!("Type:{lt}"));
+        }
+        if let Some(ref task_status) = app.task_status_filter {
+            filter_parts.push(format!("TaskStatus:{task_status}"));
+        }
+        let filter_text = if !filter_parts.is_empty() {
+            format!(" | Filters: {}", filter_parts.join(", "))
+        } else {
+            String::new()
+        };
+
+        let mut line3_spans = vec![
             Span::styled("Last refresh: ", Style::default().fg(Color::Gray)),
             Span::styled(refresh_text, Style::default().fg(Color::White)),
             Span::styled(" | ", Style::default().fg(Color::DarkGray)),
             Span::styled("Auto-refresh: ", Style::default().fg(Color::Gray)),
             Span::styled(auto_refresh_status, Style::default().fg(Color::White)),
-            if app.search_mode || !app.search_query.is_empty() {
-                Span::styled(
-                    format!(
-                        " | Search: {}",
-                        if app.search_query.is_empty() {
-                            "_"
-                        } else {
-                            &app.search_query
-                        }
-                    ),
-                    Style::default().fg(Color::Yellow),
-                )
-            } else {
-                Span::raw("")
-            },
-        ]);
+        ];
+
+        // Add search status if active
+        if app.search_mode || !app.search_query.is_empty() {
+            let search_mode_indicator = if app.search_regex_mode { "Regex" } else { "Search" };
+            line3_spans.push(Span::styled(
+                format!(
+                    " | {}: {}",
+                    search_mode_indicator,
+                    if app.search_query.is_empty() {
+                        "_".to_string()
+                    } else {
+                        app.search_query.clone()
+                    }
+                ),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+
+        // Add filter status if active
+        if !filter_text.is_empty() {
+            line3_spans.push(Span::styled(
+                filter_text,
+                Style::default().fg(Color::Magenta),
+            ));
+        }
+
+        let line3 = Line::from(line3_spans);
 
         vec![line1, line2, line3]
     };
@@ -1083,20 +1112,43 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("Toggle auto-tail (in Logs view)"),
         ]),
         Line::from(vec![
+            Span::styled("  x           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Execute action (restart service/stop task)"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "Search & Filters",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
             Span::styled("  /           ", Style::default().fg(Color::Yellow)),
-            Span::raw("Search/Filter view | Search logs (in Logs view)"),
+            Span::raw("Enter search mode (Clusters/Services/Tasks)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  M           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Toggle regex mode for search"),
+        ]),
+        Line::from(vec![
+            Span::styled("  F           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Cycle status filter (Services/Tasks)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  L           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Cycle launch type filter (Services)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  C           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Clear all active filters"),
         ]),
         Line::from(vec![
             Span::styled("  f           ", Style::default().fg(Color::Yellow)),
-            Span::raw("Cycle log level filter (in Logs view)"),
+            Span::raw("Cycle log level filter (Logs view)"),
         ]),
         Line::from(vec![
             Span::styled("  e           ", Style::default().fg(Color::Yellow)),
-            Span::raw("Export logs to file (in Logs view)"),
-        ]),
-        Line::from(vec![
-            Span::styled("  x           ", Style::default().fg(Color::Yellow)),
-            Span::raw("Execute action (restart service/stop task)"),
+            Span::raw("Export logs to file (Logs view)"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
