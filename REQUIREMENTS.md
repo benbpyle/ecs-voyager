@@ -111,7 +111,11 @@ Context:
 - [x] r - Refresh
 - [x] d - Describe (show details)
 - [x] x - Execute action (context-dependent)
-- [ ] / - Search/filter
+- [x] / - Search/filter
+- [x] M - Toggle regex mode for search
+- [x] F - Cycle status filters (Services/Tasks)
+- [x] L - Cycle launch type filter (Services)
+- [x] C - Clear all active filters
 - [ ] : - Command mode
 - [ ] y - Yank/copy to clipboard
 
@@ -140,18 +144,18 @@ Context:
 ### 5. Search & Filtering
 
 #### 5.1 Search
-- [ ] Press '/' to enter search mode
-- [ ] Filter current view by search term
-- [ ] Highlight matching items
-- [ ] Clear search with Esc
-- [ ] Regex pattern support
+- [x] Press '/' to enter search mode
+- [x] Filter current view by search term
+- [ ] Highlight matching items (partial: filters work, text highlighting not yet implemented)
+- [x] Clear search with Esc
+- [x] Regex pattern support (toggle with 'M' key)
 
 #### 5.2 Filtering
-- [ ] Filter by service status (ACTIVE, DRAINING)
-- [ ] Filter by task status (RUNNING, STOPPED, PENDING)
-- [ ] Filter by launch type (EC2, FARGATE)
-- [ ] Save filter presets
-- [ ] Multi-criteria filtering
+- [x] Filter by service status (ACTIVE, DRAINING) - cycle with 'F' key
+- [x] Filter by task status (RUNNING, STOPPED, PENDING) - cycle with 'F' key
+- [x] Filter by launch type (EC2, FARGATE) - cycle with 'L' key
+- [ ] Save filter presets (deferred for future release)
+- [x] Multi-criteria filtering (search + filters work together)
 
 ### 6. Logs & Monitoring
 

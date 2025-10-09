@@ -181,6 +181,42 @@ async fn run_app<B: ratatui::backend::Backend>(
                                     app.cycle_log_level_filter();
                                 }
                             }
+                            KeyCode::Char('F') => {
+                                // Cycle filters based on current view
+                                match app.state {
+                                    AppState::Services => {
+                                        app.cycle_service_status_filter();
+                                    }
+                                    AppState::Tasks => {
+                                        app.cycle_task_status_filter();
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            KeyCode::Char('L') => {
+                                // Cycle launch type filter in services view
+                                if app.state == AppState::Services {
+                                    app.cycle_launch_type_filter();
+                                }
+                            }
+                            KeyCode::Char('C') => {
+                                // Clear all filters (except in logs view where it might be confusing)
+                                if app.state == AppState::Clusters
+                                    || app.state == AppState::Services
+                                    || app.state == AppState::Tasks
+                                {
+                                    app.clear_all_filters();
+                                }
+                            }
+                            KeyCode::Char('M') => {
+                                // Toggle regex mode
+                                if app.state == AppState::Clusters
+                                    || app.state == AppState::Services
+                                    || app.state == AppState::Tasks
+                                {
+                                    app.toggle_regex_mode();
+                                }
+                            }
                             KeyCode::Char('e') => {
                                 // Export logs in logs view
                                 if app.state == AppState::Logs {

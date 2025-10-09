@@ -117,6 +117,16 @@ pub struct App {
     pub search_mode: bool,
     /// Current search/filter query string
     pub search_query: String,
+    /// Whether regex mode is enabled for search
+    pub search_regex_mode: bool,
+
+    // Filtering
+    /// Active service status filter (None = show all)
+    pub service_status_filter: Option<String>,
+    /// Active task status filter (None = show all)
+    pub task_status_filter: Option<String>,
+    /// Active launch type filter (None = show all)
+    pub launch_type_filter: Option<String>,
 
     // Log filtering and search
     /// Whether log search input mode is active
@@ -346,6 +356,10 @@ impl App {
             metrics_scroll: 0,
             search_mode: false,
             search_query: String::new(),
+            search_regex_mode: false,
+            service_status_filter: None,
+            task_status_filter: None,
+            launch_type_filter: None,
             log_search_mode: false,
             log_search_query: String::new(),
             log_level_filter: None,
@@ -1077,10 +1091,87 @@ impl App {
         self.selected_index = 0;
     }
 
+    /// Toggles regex mode for search queries
+    pub fn toggle_regex_mode(&mut self) {
+        self.search_regex_mode = !self.search_regex_mode;
+        self.status_message = format!(
+            "Regex mode: {}",
+            if self.search_regex_mode { "ON" } else { "OFF" }
+        );
+    }
+
+    /// Cycles through service status filters (None -> ACTIVE -> DRAINING -> None)
+    pub fn cycle_service_status_filter(&mut self) {
+        self.service_status_filter = match &self.service_status_filter {
+            None => Some("ACTIVE".to_string()),
+            Some(status) if status == "ACTIVE" => Some("DRAINING".to_string()),
+            _ => None,
+        };
+        let filter_msg = match &self.service_status_filter {
+            None => "all statuses".to_string(),
+            Some(status) => status.clone(),
+        };
+        self.status_message = format!("Service status filter: {filter_msg}");
+    }
+
+    /// Cycles through task status filters (None -> RUNNING -> PENDING -> STOPPED -> None)
+    pub fn cycle_task_status_filter(&mut self) {
+        self.task_status_filter = match &self.task_status_filter {
+            None => Some("RUNNING".to_string()),
+            Some(status) if status == "RUNNING" => Some("PENDING".to_string()),
+            Some(status) if status == "PENDING" => Some("STOPPED".to_string()),
+            _ => None,
+        };
+        let filter_msg = match &self.task_status_filter {
+            None => "all statuses".to_string(),
+            Some(status) => status.clone(),
+        };
+        self.status_message = format!("Task status filter: {filter_msg}");
+    }
+
+    /// Cycles through launch type filters (None -> FARGATE -> EC2 -> EXTERNAL -> None)
+    pub fn cycle_launch_type_filter(&mut self) {
+        self.launch_type_filter = match &self.launch_type_filter {
+            None => Some("FARGATE".to_string()),
+            Some(lt) if lt == "FARGATE" => Some("EC2".to_string()),
+            Some(lt) if lt == "EC2" => Some("EXTERNAL".to_string()),
+            _ => None,
+        };
+        let filter_msg = match &self.launch_type_filter {
+            None => "all types".to_string(),
+            Some(lt) => lt.clone(),
+        };
+        self.status_message = format!("Launch type filter: {filter_msg}");
+    }
+
+    /// Clears all active filters
+    pub fn clear_all_filters(&mut self) {
+        self.service_status_filter = None;
+        self.task_status_filter = None;
+        self.launch_type_filter = None;
+        self.status_message = "All filters cleared".to_string();
+    }
+
+    /// Returns filtered clusters based on search query and regex mode
     pub fn get_filtered_clusters(&self) -> Vec<String> {
         if self.search_query.is_empty() {
-            self.clusters.clone()
+            return self.clusters.clone();
+        }
+
+        if self.search_regex_mode {
+            // Use regex matching
+            if let Ok(re) = regex::Regex::new(&self.search_query) {
+                self.clusters
+                    .iter()
+                    .filter(|cluster| re.is_match(cluster))
+                    .cloned()
+                    .collect()
+            } else {
+                // Invalid regex, return all clusters
+                self.clusters.clone()
+            }
         } else {
+            // Use simple substring matching (case-insensitive)
             let query_lower = self.search_query.to_lowercase();
             self.clusters
                 .iter()
@@ -1090,38 +1181,79 @@ impl App {
         }
     }
 
+    /// Returns filtered services based on search query, regex mode, and active filters
     pub fn get_filtered_services(&self) -> Vec<ServiceInfo> {
-        if self.search_query.is_empty() {
-            self.services.clone()
-        } else {
-            let query_lower = self.search_query.to_lowercase();
-            self.services
-                .iter()
-                .filter(|service| {
+        let mut filtered = self.services.clone();
+
+        // Apply status filter
+        if let Some(ref status_filter) = self.service_status_filter {
+            filtered.retain(|s| s.status == *status_filter);
+        }
+
+        // Apply launch type filter
+        if let Some(ref lt_filter) = self.launch_type_filter {
+            filtered.retain(|s| s.launch_type == *lt_filter);
+        }
+
+        // Apply search query
+        if !self.search_query.is_empty() {
+            if self.search_regex_mode {
+                // Use regex matching
+                if let Ok(re) = regex::Regex::new(&self.search_query) {
+                    filtered.retain(|service| {
+                        re.is_match(&service.name)
+                            || re.is_match(&service.status)
+                            || re.is_match(&service.launch_type)
+                    });
+                }
+                // If regex is invalid, keep all results from previous filters
+            } else {
+                // Use simple substring matching (case-insensitive)
+                let query_lower = self.search_query.to_lowercase();
+                filtered.retain(|service| {
                     service.name.to_lowercase().contains(&query_lower)
                         || service.status.to_lowercase().contains(&query_lower)
                         || service.launch_type.to_lowercase().contains(&query_lower)
-                })
-                .cloned()
-                .collect()
+                });
+            }
         }
+
+        filtered
     }
 
+    /// Returns filtered tasks based on search query, regex mode, and active filters
     pub fn get_filtered_tasks(&self) -> Vec<TaskInfo> {
-        if self.search_query.is_empty() {
-            self.tasks.clone()
-        } else {
-            let query_lower = self.search_query.to_lowercase();
-            self.tasks
-                .iter()
-                .filter(|task| {
+        let mut filtered = self.tasks.clone();
+
+        // Apply task status filter
+        if let Some(ref status_filter) = self.task_status_filter {
+            filtered.retain(|t| t.status == *status_filter);
+        }
+
+        // Apply search query
+        if !self.search_query.is_empty() {
+            if self.search_regex_mode {
+                // Use regex matching
+                if let Ok(re) = regex::Regex::new(&self.search_query) {
+                    filtered.retain(|task| {
+                        re.is_match(&task.task_id)
+                            || re.is_match(&task.status)
+                            || re.is_match(&task.desired_status)
+                    });
+                }
+                // If regex is invalid, keep all results from previous filters
+            } else {
+                // Use simple substring matching (case-insensitive)
+                let query_lower = self.search_query.to_lowercase();
+                filtered.retain(|task| {
                     task.task_id.to_lowercase().contains(&query_lower)
                         || task.status.to_lowercase().contains(&query_lower)
                         || task.desired_status.to_lowercase().contains(&query_lower)
-                })
-                .cloned()
-                .collect()
+                });
+            }
         }
+
+        filtered
     }
 
     // Modal management methods
@@ -1444,6 +1576,10 @@ mod tests {
             metrics_scroll: 0,
             search_mode: false,
             search_query: String::new(),
+            search_regex_mode: false,
+            service_status_filter: None,
+            task_status_filter: None,
+            launch_type_filter: None,
             log_search_mode: false,
             log_search_query: String::new(),
             log_level_filter: None,
@@ -2439,5 +2575,264 @@ mod tests {
         assert_eq!(LogLevel::Error, LogLevel::Error);
         assert_ne!(LogLevel::Error, LogLevel::Warn);
         assert_eq!(LogLevel::Info, LogLevel::Info);
+    }
+
+    // Tests for regex search functionality
+    #[test]
+    fn test_toggle_regex_mode() {
+        let mut app = create_test_app();
+        assert!(!app.search_regex_mode);
+
+        app.toggle_regex_mode();
+        assert!(app.search_regex_mode);
+        assert!(app.status_message.contains("Regex mode: ON"));
+
+        app.toggle_regex_mode();
+        assert!(!app.search_regex_mode);
+        assert!(app.status_message.contains("Regex mode: OFF"));
+    }
+
+    #[test]
+    fn test_search_with_regex_pattern() {
+        let mut app = create_test_app();
+        app.search_regex_mode = true;
+        app.search_query = "cluster-(prod|dev)".to_string();
+
+        let filtered = app.get_filtered_clusters();
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.contains(&"cluster-prod".to_string()));
+        assert!(filtered.contains(&"cluster-dev".to_string()));
+        assert!(!filtered.contains(&"cluster-staging".to_string()));
+    }
+
+    #[test]
+    fn test_search_with_invalid_regex() {
+        let mut app = create_test_app();
+        app.search_regex_mode = true;
+        app.search_query = "[invalid(".to_string(); // Invalid regex
+
+        let filtered = app.get_filtered_clusters();
+        // Should return all clusters when regex is invalid
+        assert_eq!(filtered.len(), 3);
+    }
+
+    #[test]
+    fn test_regex_case_sensitive() {
+        let mut app = create_test_app();
+        app.search_regex_mode = true;
+        app.search_query = "PROD".to_string();
+
+        let filtered = app.get_filtered_clusters();
+        // Regex is case-sensitive by default
+        assert_eq!(filtered.len(), 0);
+    }
+
+    #[test]
+    fn test_regex_with_services() {
+        let mut app = create_test_app();
+        app.search_regex_mode = true;
+        app.search_query = "^(web|api)-".to_string();
+
+        let filtered = app.get_filtered_services();
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().any(|s| s.name == "web-service"));
+        assert!(filtered.iter().any(|s| s.name == "api-service"));
+    }
+
+    // Tests for service status filter
+    #[test]
+    fn test_cycle_service_status_filter() {
+        let mut app = create_test_app();
+        assert_eq!(app.service_status_filter, None);
+
+        app.cycle_service_status_filter();
+        assert_eq!(app.service_status_filter, Some("ACTIVE".to_string()));
+
+        app.cycle_service_status_filter();
+        assert_eq!(app.service_status_filter, Some("DRAINING".to_string()));
+
+        app.cycle_service_status_filter();
+        assert_eq!(app.service_status_filter, None);
+    }
+
+    #[test]
+    fn test_filter_services_by_status() {
+        let mut app = create_test_app();
+        app.service_status_filter = Some("ACTIVE".to_string());
+
+        let filtered = app.get_filtered_services();
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|s| s.status == "ACTIVE"));
+    }
+
+    #[test]
+    fn test_filter_services_by_status_draining() {
+        let mut app = create_test_app();
+        app.service_status_filter = Some("DRAINING".to_string());
+
+        let filtered = app.get_filtered_services();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "worker-service");
+    }
+
+    // Tests for launch type filter
+    #[test]
+    fn test_cycle_launch_type_filter() {
+        let mut app = create_test_app();
+        assert_eq!(app.launch_type_filter, None);
+
+        app.cycle_launch_type_filter();
+        assert_eq!(app.launch_type_filter, Some("FARGATE".to_string()));
+
+        app.cycle_launch_type_filter();
+        assert_eq!(app.launch_type_filter, Some("EC2".to_string()));
+
+        app.cycle_launch_type_filter();
+        assert_eq!(app.launch_type_filter, Some("EXTERNAL".to_string()));
+
+        app.cycle_launch_type_filter();
+        assert_eq!(app.launch_type_filter, None);
+    }
+
+    #[test]
+    fn test_filter_services_by_launch_type() {
+        let mut app = create_test_app();
+        app.launch_type_filter = Some("FARGATE".to_string());
+
+        let filtered = app.get_filtered_services();
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|s| s.launch_type == "FARGATE"));
+    }
+
+    #[test]
+    fn test_filter_services_by_launch_type_ec2() {
+        let mut app = create_test_app();
+        app.launch_type_filter = Some("EC2".to_string());
+
+        let filtered = app.get_filtered_services();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "api-service");
+    }
+
+    // Tests for task status filter
+    #[test]
+    fn test_cycle_task_status_filter() {
+        let mut app = create_test_app();
+        assert_eq!(app.task_status_filter, None);
+
+        app.cycle_task_status_filter();
+        assert_eq!(app.task_status_filter, Some("RUNNING".to_string()));
+
+        app.cycle_task_status_filter();
+        assert_eq!(app.task_status_filter, Some("PENDING".to_string()));
+
+        app.cycle_task_status_filter();
+        assert_eq!(app.task_status_filter, Some("STOPPED".to_string()));
+
+        app.cycle_task_status_filter();
+        assert_eq!(app.task_status_filter, None);
+    }
+
+    #[test]
+    fn test_filter_tasks_by_status() {
+        let mut app = create_test_app();
+        app.task_status_filter = Some("RUNNING".to_string());
+
+        let filtered = app.get_filtered_tasks();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].task_id, "task-abc123");
+    }
+
+    #[test]
+    fn test_filter_tasks_by_status_pending() {
+        let mut app = create_test_app();
+        app.task_status_filter = Some("PENDING".to_string());
+
+        let filtered = app.get_filtered_tasks();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].task_id, "task-def456");
+    }
+
+    #[test]
+    fn test_filter_tasks_by_status_stopped() {
+        let mut app = create_test_app();
+        app.task_status_filter = Some("STOPPED".to_string());
+
+        let filtered = app.get_filtered_tasks();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].task_id, "task-ghi789");
+    }
+
+    // Tests for multi-criteria filtering
+    #[test]
+    fn test_multi_criteria_filter_services() {
+        let mut app = create_test_app();
+        app.service_status_filter = Some("ACTIVE".to_string());
+        app.launch_type_filter = Some("FARGATE".to_string());
+
+        let filtered = app.get_filtered_services();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "web-service");
+    }
+
+    #[test]
+    fn test_multi_criteria_filter_with_search() {
+        let mut app = create_test_app();
+        app.service_status_filter = Some("ACTIVE".to_string());
+        app.search_query = "web".to_string();
+
+        let filtered = app.get_filtered_services();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "web-service");
+    }
+
+    #[test]
+    fn test_multi_criteria_filter_with_regex() {
+        let mut app = create_test_app();
+        app.service_status_filter = Some("ACTIVE".to_string());
+        app.search_regex_mode = true;
+        app.search_query = "^web".to_string();
+
+        let filtered = app.get_filtered_services();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "web-service");
+    }
+
+    #[test]
+    fn test_clear_all_filters() {
+        let mut app = create_test_app();
+        app.service_status_filter = Some("ACTIVE".to_string());
+        app.launch_type_filter = Some("FARGATE".to_string());
+        app.task_status_filter = Some("RUNNING".to_string());
+
+        app.clear_all_filters();
+
+        assert_eq!(app.service_status_filter, None);
+        assert_eq!(app.launch_type_filter, None);
+        assert_eq!(app.task_status_filter, None);
+        assert!(app.status_message.contains("cleared"));
+    }
+
+    #[test]
+    fn test_filter_tasks_with_regex() {
+        let mut app = create_test_app();
+        app.search_regex_mode = true;
+        app.search_query = "task-(abc|def)".to_string();
+
+        let filtered = app.get_filtered_tasks();
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().any(|t| t.task_id == "task-abc123"));
+        assert!(filtered.iter().any(|t| t.task_id == "task-def456"));
+    }
+
+    #[test]
+    fn test_combined_task_filter_and_search() {
+        let mut app = create_test_app();
+        app.task_status_filter = Some("RUNNING".to_string());
+        app.search_query = "abc".to_string();
+
+        let filtered = app.get_filtered_tasks();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].task_id, "task-abc123");
     }
 }
