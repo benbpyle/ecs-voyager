@@ -322,7 +322,11 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
 
         // Add search status if active
         if app.search_mode || !app.search_query.is_empty() {
-            let search_mode_indicator = if app.search_regex_mode { "Regex" } else { "Search" };
+            let search_mode_indicator = if app.search_regex_mode {
+                "Regex"
+            } else {
+                "Search"
+            };
             line3_spans.push(Span::styled(
                 format!(
                     " | {}: {}",
