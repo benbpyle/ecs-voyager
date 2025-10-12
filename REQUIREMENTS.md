@@ -4,6 +4,32 @@
 
 A terminal user interface (TUI) for exploring and managing AWS ECS resources, inspired by k9s for Kubernetes. The tool should provide an intuitive, keyboard-driven experience for DevOps engineers and developers working with ECS.
 
+## Competitive Analysis (Updated 2025-01-12)
+
+### Main Competitors
+1. **e1s** (keidarcy/e1s) - Most feature-complete competitor
+2. **ecsplorer** (masaushi/ecsplorer) - Simpler, early-stage tool
+
+### Our Competitive Advantages ✅
+- **Native AWS SDK** - Direct SDK integration (no AWS CLI dependency)
+- **Advanced Search/Filtering** - Regex support, multi-criteria filtering
+- **Well-tested** - 219 unit tests, >70% code coverage
+- **Rust-based** - Superior performance and error handling
+- **CloudWatch Logs** - Full log viewer with auto-tail
+- **Metrics Integration** - CPU/Memory with ASCII charts
+- **Comprehensive Documentation** - Full rustdoc comments
+
+### Critical Feature Gaps vs. e1s ❌
+1. **ECS Exec** - Interactive shell into containers (PRIORITY 1)
+2. **Port Forwarding** - Access private subnet services locally (PRIORITY 5)
+3. **Task Definition Management** - View/update/compare (PRIORITY 3)
+4. **Service Editing** - Update desired count, task def on-the-fly (PRIORITY 2)
+5. **Read-only Mode** - Safety feature to prevent accidents (PRIORITY 6)
+6. **Configuration File** - TOML config support (PRIORITY 4)
+
+### Strategic Focus
+To compete effectively with e1s, we must prioritize features that developers use daily for debugging and operations, particularly **ECS Exec** and **service management capabilities**.
+
 ## Core Requirements
 
 Context:  
@@ -223,6 +249,20 @@ Context:
 - [ ] Copy resource ARNs
 - [ ] Generate AWS CLI commands
 
+#### 8.5 Port Forwarding (NEW - PRIORITY 5)
+- [ ] List available port forwarding targets from tasks view
+- [ ] Initiate port forwarding session to container
+- [ ] Support custom local port selection
+- [ ] Support custom remote port/target selection
+- [ ] Display active port forwarding sessions
+- [ ] Terminate port forwarding sessions
+- [ ] Show connection status and statistics
+- [ ] Support multiple simultaneous forwards
+- [ ] Use SSM Session Manager for secure tunneling
+- [ ] Handle port conflicts gracefully
+- [ ] Persist port forwarding preferences
+- [ ] Auto-reconnect on connection drop
+
 ### 9. Error Handling & Resilience
 
 #### 9.1 Error Display
@@ -237,6 +277,21 @@ Context:
 - [ ] Check IAM permissions
 - [ ] Validate terminal size
 - [ ] Warn on missing optional features
+
+#### 9.3 Read-only Mode (NEW - PRIORITY 6)
+- [ ] Toggle read-only mode on/off (keybinding: 'R' or command-line flag)
+- [ ] Display read-only indicator in status bar
+- [ ] Disable destructive operations when enabled:
+  - Service restarts (force new deployment)
+  - Task stops
+  - Service updates (desired count, task definition)
+  - Task definition registration
+  - Any write operations to AWS
+- [ ] Show warning when user attempts destructive action
+- [ ] Allow read-only mode by default (opt-in for write operations)
+- [ ] Configuration file option for default mode
+- [ ] Environment variable support (ECS_VOYAGER_READONLY=true)
+- [ ] Audit log for attempted operations in read-only mode
 
 ### 10. Performance & Optimization
 
@@ -296,9 +351,9 @@ Context:
 - [x] Security scanning (cargo-audit in workflow)
 - [ ] Dependency updates (Dependabot)
 
-## Priority Levels
+## Priority Levels (Updated Based on Competitive Analysis)
 
-### P0 - MVP (Complete)
+### P0 - MVP (COMPLETED ✅)
 - [x] Basic navigation (clusters → services → tasks)
 - [x] View resource details
 - [x] Manual refresh
@@ -308,23 +363,66 @@ Context:
 
 ### P1 - Essential (COMPLETED ✅)
 - [x] Work off of the AWS SDK not the AWS CLI
-- [x] Search/filter functionality
+- [x] Search/filter functionality (regex + multi-criteria)
 - [x] CloudWatch logs viewer
-- [x] Configuration file support
 - [x] Loading indicators
 - [x] Comprehensive documentation comments
-- [x] Unit tests (84 tests, >70% coverage)
+- [x] Unit tests (219 tests, >70% coverage)
+- [x] Metrics integration (CPU/Memory with ASCII charts)
 
-### P2 - Enhanced
-- [ ] ECS Exec support
-- [ ] Multi-region support
-- [ ] Metrics/monitoring
-- [ ] Task definition management
-- [ ] Export functionality
+### P2 - Competitive Parity (HIGH PRIORITY - Match e1s features)
+**These features are critical to compete with e1s. Implement in this order:**
 
-### P3 - Nice to Have
+1. **PRIORITY 1: ECS Exec Support** (Section 8.1) ⭐⭐⭐
+   - [ ] Check if task supports ECS Exec
+   - [ ] Launch interactive shell into containers
+   - [ ] Execute one-off commands
+   - [ ] Session logging
+   - **Impact:** Most requested debugging feature, e1s's killer feature
+
+2. **PRIORITY 2: Service Management Enhancements** (Section 3.1) ⭐⭐⭐
+   - [ ] Update service desired count
+   - [ ] Update service task definition
+   - [ ] Confirmation prompts for destructive actions
+   - [ ] View service events/deployments
+   - **Impact:** Daily operations, match e1s's service editing
+
+3. **PRIORITY 3: Task Definition Management** (Section 8.2) ⭐⭐
+   - [ ] View task definition details
+   - [ ] Compare task definition versions
+   - [ ] Register new task definition
+   - [ ] Export task definition to JSON/YAML
+   - **Impact:** Essential for understanding and managing deployments
+
+4. **PRIORITY 4: Configuration File** (Section 7) ⭐⭐
+   - [ ] Support ~/.ecs-voyager/config.toml
+   - [ ] Configure default AWS region/profile
+   - [ ] Configure refresh interval
+   - [ ] Configure keybindings
+   - [ ] Configure default view
+   - **Impact:** Foundation for customization, e1s already has this
+
+5. **PRIORITY 5: Port Forwarding** (Section 8.5) ⭐
+   - [ ] Initiate port forwarding to containers
+   - [ ] Support custom local/remote ports
+   - [ ] Display active sessions
+   - [ ] Use SSM Session Manager for tunneling
+   - **Impact:** Critical for debugging private subnet services
+
+6. **PRIORITY 6: Read-only Mode** (Section 9.3) ⭐
+   - [ ] Toggle read-only mode
+   - [ ] Disable destructive operations
+   - [ ] Display mode indicator
+   - **Impact:** Safety feature to prevent accidents
+
+### P3 - Enhanced
+- [ ] Multi-region support (Section 8.3)
+- [ ] Export functionality (JSON/CSV/YAML) (Section 8.4)
+- [ ] Cluster management (Section 3.3)
+- [ ] Performance optimization (caching, pagination) (Section 10)
+
+### P4 - Nice to Have
 - [ ] Custom themes
-- [ ] Advanced filtering
 - [ ] Session recording
 - [ ] Plugin system
 - [ ] API for automation
@@ -573,6 +671,164 @@ search = "/"
 - [ ] In-app update command
 - [ ] Auto-update option (opt-in)
 - [ ] Release channel selection (stable/beta)
+
+## Implementation Roadmap (Competitive-Driven)
+
+This roadmap prioritizes features that close the gap with e1s while leveraging our unique advantages (native AWS SDK, advanced search, strong testing).
+
+### Phase 1: ECS Exec & Core Operations (Q1 2025)
+**Goal:** Match e1s's most critical debugging feature
+
+**Features:**
+- ✅ Section 8.1: ECS Exec Support (PRIORITY 1)
+  - Interactive shell into containers
+  - One-off command execution
+  - ECS Exec capability checking
+  - Session logging and history
+
+**Dependencies:**
+- AWS SSM Session Manager integration
+- Terminal PTY handling for interactive sessions
+- Proper IAM permission checking
+
+**Estimated Effort:** 3-4 weeks
+**Key Deliverable:** `ecs-voyager exec` command for container access
+
+---
+
+### Phase 2: Service Management & Safety (Q1 2025)
+**Goal:** Enable daily operations and prevent accidents
+
+**Features:**
+- ✅ Section 3.1: Service Management Enhancements (PRIORITY 2)
+  - Update service desired count with validation
+  - Update service task definition
+  - View service events and deployment history
+  - Rich deployment status display
+
+- ✅ Section 9.3: Read-only Mode (PRIORITY 6)
+  - Toggle read-only mode (default: on)
+  - Confirmation prompts for all destructive actions
+  - Clear visual indicators
+
+**Dependencies:**
+- ECS UpdateService API integration
+- ECS DescribeServices events parsing
+- Input validation and error handling
+
+**Estimated Effort:** 2-3 weeks
+**Key Deliverable:** Safe, auditable service modifications
+
+---
+
+### Phase 3: Task Definition Management (Q2 2025)
+**Goal:** Complete view/edit/compare workflow for task definitions
+
+**Features:**
+- ✅ Section 8.2: Task Definition Management (PRIORITY 3)
+  - View task definition JSON (syntax highlighted)
+  - Compare two task definition revisions (diff view)
+  - Register new task definition from file/editor
+  - Export task definition to JSON/YAML
+  - Task definition revision history browser
+
+**Dependencies:**
+- JSON/YAML parsing and formatting
+- Diff algorithm for revision comparison
+- File I/O for export/import
+
+**Estimated Effort:** 2-3 weeks
+**Key Deliverable:** Complete task definition workflow in TUI
+
+---
+
+### Phase 4: Configuration System (Q2 2025)
+**Goal:** Enable user customization and persistence
+
+**Features:**
+- ✅ Section 7: Configuration File (PRIORITY 4)
+  - TOML config file at `~/.ecs-voyager/config.toml`
+  - AWS region/profile configuration
+  - Auto-refresh interval settings
+  - Keybinding customization
+  - Default view selection
+  - Color theme preferences
+  - Config validation and migration
+
+**Dependencies:**
+- TOML parsing library (serde integration)
+- Config file watching for hot-reload
+- Schema validation
+
+**Estimated Effort:** 2 weeks
+**Key Deliverable:** Fully customizable user experience
+
+---
+
+### Phase 5: Port Forwarding (Q2 2025)
+**Goal:** Enable access to private subnet services
+
+**Features:**
+- ✅ Section 8.5: Port Forwarding (PRIORITY 5)
+  - SSM Session Manager port forwarding
+  - Local/remote port configuration
+  - Active session management
+  - Connection status monitoring
+  - Multiple simultaneous forwards
+
+**Dependencies:**
+- AWS SSM StartSession API
+- Local port binding and forwarding
+- Session lifecycle management
+
+**Estimated Effort:** 2-3 weeks
+**Key Deliverable:** Secure tunneling to ECS tasks
+
+---
+
+### Phase 6: Polish & Performance (Q3 2025)
+**Goal:** Production-ready quality
+
+**Features:**
+- ✅ Section 10: Performance Optimization
+  - Caching for cluster/service/task lists
+  - Pagination for large result sets (100+ items)
+  - Parallel data fetching
+  - Request cancellation
+
+- ✅ Section 8.3: Multi-region Support
+  - Region selector UI
+  - Switch region at runtime
+  - Cross-region cluster listing
+
+- ✅ Section 8.4: Export & Sharing
+  - Export to JSON/CSV/YAML
+  - Copy ARNs to clipboard
+  - Generate AWS CLI commands
+
+**Dependencies:**
+- Async runtime optimization
+- Memory-efficient data structures
+- Cross-region AWS client handling
+
+**Estimated Effort:** 3-4 weeks
+**Key Deliverable:** Production-grade performance and UX
+
+---
+
+### Testing Strategy (Continuous)
+- **Unit tests:** >80% coverage target for all new features
+- **Integration tests:** Mock AWS SDK calls for all operations
+- **Manual testing:** Test with real ECS clusters (dev/staging)
+- **Performance testing:** Benchmark with 100+ services/tasks
+- **Security testing:** IAM permission validation, audit logging
+
+### Success Metrics
+- **Feature Parity:** Match e1s on top 6 priority features by Q2 2025
+- **Performance:** Sub-second response for all operations
+- **Reliability:** Zero crashes, graceful error handling
+- **Testing:** >80% code coverage maintained
+- **Adoption:** 50+ GitHub stars, 10+ active contributors by Q3 2025
 
 ## Success Criteria
 
