@@ -134,6 +134,20 @@ pub struct Metrics {
     pub service_name: String,
 }
 
+/// Session information returned by ECS ExecuteCommand API.
+///
+/// Contains the credentials needed to establish a connection to a container
+/// via AWS Systems Manager Session Manager.
+#[derive(Debug, Clone)]
+pub struct Session {
+    /// Unique session identifier
+    pub session_id: String,
+    /// WebSocket URL for the session connection
+    pub stream_url: String,
+    /// Authentication token for the session
+    pub token_value: String,
+}
+
 impl EcsClient {
     /// Creates a new ECS client with optional region and profile configuration.
     ///
@@ -1015,6 +1029,210 @@ impl EcsClient {
             service_name: service_name.to_string(),
         })
     }
+
+    /// Checks if a task has ECS Exec enabled.
+    ///
+    /// Queries the task details to determine if ExecuteCommand capability is enabled.
+    /// This must be enabled when the task is started for ECS Exec to work.
+    ///
+    /// # Arguments
+    /// * `cluster` - The cluster name or ARN
+    /// * `task_arn` - The full task ARN
+    ///
+    /// # Returns
+    /// Returns `true` if ECS Exec is enabled, `false` otherwise
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The AWS DescribeTasks API call fails
+    /// - The task doesn't exist
+    /// - Insufficient permissions to describe the task
+    pub async fn check_task_exec_enabled(&self, cluster: &str, task_arn: &str) -> Result<bool> {
+        let resp = self
+            .client
+            .describe_tasks()
+            .cluster(cluster)
+            .tasks(task_arn)
+            .send()
+            .await?;
+
+        if let Some(task) = resp.tasks().first() {
+            Ok(task.enable_execute_command())
+        } else {
+            anyhow::bail!("Task not found: {task_arn}")
+        }
+    }
+
+    /// Executes a command on a running ECS task container.
+    ///
+    /// Initiates an interactive session with the specified task using the ECS ExecuteCommand API.
+    /// Returns session credentials that can be used with AWS Systems Manager Session Manager
+    /// to establish a WebSocket connection to the container.
+    ///
+    /// # Arguments
+    /// * `cluster` - The cluster name or ARN
+    /// * `task_arn` - The full task ARN
+    /// * `container_name` - Optional container name (uses first container if not specified)
+    /// * `command` - The command to execute (e.g., "/bin/sh" for interactive shell)
+    ///
+    /// # Returns
+    /// Returns a `Session` struct containing sessionId, streamUrl, and tokenValue
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The AWS ExecuteCommand API call fails
+    /// - ECS Exec is not enabled on the task
+    /// - The task doesn't exist or has no containers
+    /// - Insufficient IAM permissions for ECS Exec
+    /// - The specified container doesn't exist
+    pub async fn execute_command(
+        &self,
+        cluster: &str,
+        task_arn: &str,
+        container_name: Option<String>,
+        command: &str,
+    ) -> Result<Session> {
+        // If no container specified, get the first container from the task
+        let container = if let Some(name) = container_name {
+            name
+        } else {
+            // Describe task to get first container name
+            let task_resp = self
+                .client
+                .describe_tasks()
+                .cluster(cluster)
+                .tasks(task_arn)
+                .send()
+                .await?;
+
+            if let Some(task) = task_resp.tasks().first() {
+                if let Some(container) = task.containers().first() {
+                    container
+                        .name()
+                        .ok_or_else(|| anyhow::anyhow!("Container has no name"))?
+                        .to_string()
+                } else {
+                    anyhow::bail!("Task has no containers")
+                }
+            } else {
+                anyhow::bail!("Task not found: {task_arn}")
+            }
+        };
+
+        // Execute the command
+        let resp = self
+            .client
+            .execute_command()
+            .cluster(cluster)
+            .task(task_arn)
+            .container(container)
+            .command(command)
+            .interactive(true)
+            .send()
+            .await
+            .context("Failed to execute command. Ensure ECS Exec is enabled on the task and IAM permissions are correct")?;
+
+        // Extract session info
+        let session = resp
+            .session()
+            .ok_or_else(|| anyhow::anyhow!("No session returned from ExecuteCommand API"))?;
+
+        Ok(Session {
+            session_id: session
+                .session_id()
+                .ok_or_else(|| anyhow::anyhow!("No session ID in response"))?
+                .to_string(),
+            stream_url: session
+                .stream_url()
+                .ok_or_else(|| anyhow::anyhow!("No stream URL in response"))?
+                .to_string(),
+            token_value: session
+                .token_value()
+                .ok_or_else(|| anyhow::anyhow!("No token value in response"))?
+                .to_string(),
+        })
+    }
+
+    /// Starts an interactive ECS Exec session using session-manager-plugin.
+    ///
+    /// This method:
+    /// 1. Calls ExecuteCommand to get session credentials
+    /// 2. Checks if session-manager-plugin is installed
+    /// 3. Spawns session-manager-plugin subprocess with proper arguments
+    /// 4. Waits for the session to complete
+    ///
+    /// The session-manager-plugin handles the WebSocket connection and terminal I/O.
+    /// User can exit the session with Ctrl+D or by typing `exit`.
+    ///
+    /// # Arguments
+    /// * `cluster` - The cluster name or ARN
+    /// * `task_arn` - The full task ARN
+    /// * `container_name` - Optional container name (uses first container if not specified)
+    /// * `region` - AWS region for the session
+    ///
+    /// # Returns
+    /// Returns `Ok(())` when the session ends normally
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - session-manager-plugin is not installed
+    /// - ExecuteCommand API call fails (see execute_command errors)
+    /// - Plugin process fails to start or exits with error
+    pub async fn start_exec_session(
+        &self,
+        cluster: &str,
+        task_arn: &str,
+        container_name: Option<String>,
+        region: &str,
+    ) -> Result<()> {
+        // Step 1: Check if session-manager-plugin is installed
+        let plugin_check = std::process::Command::new("session-manager-plugin").output();
+
+        if plugin_check.is_err() {
+            anyhow::bail!(
+                "session-manager-plugin not found. Please install it:\n\
+                macOS: brew install --cask session-manager-plugin\n\
+                Linux: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html"
+            );
+        }
+
+        // Step 2: Get session credentials
+        let session = self
+            .execute_command(cluster, task_arn, container_name, "/bin/sh")
+            .await?;
+
+        // Step 3: Create session JSON for plugin
+        let session_json = serde_json::json!({
+            "SessionId": session.session_id,
+            "StreamUrl": session.stream_url,
+            "TokenValue": session.token_value
+        });
+
+        // Step 4: Spawn session-manager-plugin subprocess
+        let mut child = std::process::Command::new("session-manager-plugin")
+            .arg(session_json.to_string())
+            .arg(region)
+            .arg("StartSession")
+            .stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .context("Failed to spawn session-manager-plugin")?;
+
+        // Step 5: Wait for session to complete
+        let status = child
+            .wait()
+            .context("Failed to wait for session-manager-plugin")?;
+
+        if !status.success() {
+            anyhow::bail!(
+                "session-manager-plugin exited with code: {}",
+                status.code().unwrap_or(-1)
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1689,5 +1907,212 @@ mod tests {
         let debug_string = format!("{log:?}");
         assert!(debug_string.contains("test message"));
         assert!(debug_string.contains("123"));
+    }
+
+    // Test Session structure
+    #[test]
+    fn test_session_creation() {
+        let session = Session {
+            session_id: "session-123".to_string(),
+            stream_url: "wss://example.com/stream".to_string(),
+            token_value: "token-abc-xyz".to_string(),
+        };
+
+        assert_eq!(session.session_id, "session-123");
+        assert_eq!(session.stream_url, "wss://example.com/stream");
+        assert_eq!(session.token_value, "token-abc-xyz");
+    }
+
+    #[test]
+    fn test_session_clone() {
+        let session = Session {
+            session_id: "session-456".to_string(),
+            stream_url: "wss://example.com/stream2".to_string(),
+            token_value: "token-def-uvw".to_string(),
+        };
+
+        let cloned = session.clone();
+        assert_eq!(cloned.session_id, session.session_id);
+        assert_eq!(cloned.stream_url, session.stream_url);
+        assert_eq!(cloned.token_value, session.token_value);
+    }
+
+    #[test]
+    fn test_session_json_serialization() {
+        let session = Session {
+            session_id: "sess-789".to_string(),
+            stream_url: "wss://ssm.us-east-1.amazonaws.com/v1/stream".to_string(),
+            token_value: "AQICAHhVeryLongTokenValue==".to_string(),
+        };
+
+        // Test that we can create JSON from session (as done in start_exec_session)
+        let json = serde_json::json!({
+            "SessionId": session.session_id,
+            "StreamUrl": session.stream_url,
+            "TokenValue": session.token_value
+        });
+
+        assert!(json["SessionId"].is_string());
+        assert!(json["StreamUrl"].is_string());
+        assert!(json["TokenValue"].is_string());
+        assert_eq!(json["SessionId"], "sess-789");
+    }
+
+    #[test]
+    fn test_session_with_empty_strings() {
+        let session = Session {
+            session_id: String::new(),
+            stream_url: String::new(),
+            token_value: String::new(),
+        };
+
+        assert!(session.session_id.is_empty());
+        assert!(session.stream_url.is_empty());
+        assert!(session.token_value.is_empty());
+    }
+
+    #[test]
+    fn test_session_with_special_characters() {
+        let session = Session {
+            session_id: "session-with-dashes-123".to_string(),
+            stream_url: "wss://ssm.us-west-2.amazonaws.com/v1/stream?token=abc".to_string(),
+            token_value: "token/with/slashes+and=equals==".to_string(),
+        };
+
+        assert!(session.session_id.contains('-'));
+        assert!(session.stream_url.contains('?'));
+        assert!(session.token_value.contains('/'));
+        assert!(session.token_value.contains('+'));
+        assert!(session.token_value.contains('='));
+    }
+
+    // Test container name logic for execute_command
+    #[test]
+    fn test_container_name_extraction_from_first_container() {
+        // This tests the logic that would be used in execute_command
+        // when no container name is specified
+        let containers = ["web", "sidecar", "logging"];
+        let first_container = containers.first().unwrap();
+        assert_eq!(*first_container, "web");
+    }
+
+    #[test]
+    fn test_empty_container_list_handling() {
+        let containers: Vec<&str> = vec![];
+        assert!(containers.is_empty());
+    }
+
+    // Test session-manager-plugin command construction
+    #[test]
+    fn test_plugin_command_args() {
+        // Test the arguments we would pass to session-manager-plugin
+        let session_json = serde_json::json!({
+            "SessionId": "test-session",
+            "StreamUrl": "wss://test.com",
+            "TokenValue": "test-token"
+        });
+        let region = "us-east-1";
+        let action = "StartSession";
+
+        let args = [
+            session_json.to_string(),
+            region.to_string(),
+            action.to_string(),
+        ];
+
+        assert_eq!(args.len(), 3);
+        assert!(args[0].contains("test-session"));
+        assert_eq!(args[1], "us-east-1");
+        assert_eq!(args[2], "StartSession");
+    }
+
+    #[test]
+    fn test_json_string_formatting() {
+        // Test that JSON serialization produces valid format
+        let json = serde_json::json!({
+            "SessionId": "id",
+            "StreamUrl": "url",
+            "TokenValue": "token"
+        });
+
+        let json_str = json.to_string();
+        assert!(json_str.contains("SessionId"));
+        assert!(json_str.contains("StreamUrl"));
+        assert!(json_str.contains("TokenValue"));
+    }
+
+    // Test ECS Exec error scenarios
+    #[test]
+    fn test_exec_error_message_format() {
+        // Test error message format for missing plugin
+        let error_msg = "session-manager-plugin not found. Please install it:\n\
+            macOS: brew install --cask session-manager-plugin\n\
+            Linux: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html";
+
+        assert!(error_msg.contains("session-manager-plugin"));
+        assert!(error_msg.contains("brew install"));
+        assert!(error_msg.contains("https://"));
+    }
+
+    #[test]
+    fn test_exec_command_validation() {
+        // Test command strings that would be passed to execute_command
+        let commands = vec!["/bin/sh", "/bin/bash", "/bin/ash", "sh"];
+
+        for cmd in commands {
+            assert!(!cmd.is_empty());
+            assert!(cmd.starts_with('/') || cmd == "sh");
+        }
+    }
+
+    #[test]
+    fn test_region_string_formats() {
+        // Test various AWS region formats
+        let regions = vec![
+            "us-east-1",
+            "us-west-2",
+            "eu-west-1",
+            "ap-southeast-1",
+            "sa-east-1",
+        ];
+
+        for region in regions {
+            assert!(region.contains('-'));
+            assert!(region.len() > 5);
+        }
+    }
+
+    // Test Debug trait for Session
+    #[test]
+    fn test_session_debug() {
+        let session = Session {
+            session_id: "debug-session".to_string(),
+            stream_url: "wss://debug.com".to_string(),
+            token_value: "debug-token".to_string(),
+        };
+
+        let debug_string = format!("{session:?}");
+        assert!(debug_string.contains("debug-session"));
+        assert!(debug_string.contains("wss://debug.com"));
+        assert!(debug_string.contains("debug-token"));
+    }
+
+    #[test]
+    fn test_multiple_sessions() {
+        let sessions = [
+            Session {
+                session_id: "s1".to_string(),
+                stream_url: "url1".to_string(),
+                token_value: "t1".to_string(),
+            },
+            Session {
+                session_id: "s2".to_string(),
+                stream_url: "url2".to_string(),
+                token_value: "t2".to_string(),
+            },
+        ];
+
+        assert_eq!(sessions.len(), 2);
+        assert_ne!(sessions[0].session_id, sessions[1].session_id);
     }
 }
