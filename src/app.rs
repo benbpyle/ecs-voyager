@@ -1064,6 +1064,91 @@ impl App {
         Ok(())
     }
 
+    /// Starts an interactive ECS Exec session with the selected task.
+    ///
+    /// Opens an interactive shell (/bin/sh) in the selected task's container using AWS ECS Exec.
+    /// This requires:
+    /// - The task must have `enableExecuteCommand` enabled
+    /// - The `session-manager-plugin` must be installed locally
+    /// - Appropriate IAM permissions for ECS ExecuteCommand and SSM StartSession
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - No task is currently selected
+    /// - The task doesn't have ECS Exec enabled
+    /// - The session-manager-plugin is not installed
+    /// - The AWS API call fails
+    /// - The session fails to start
+    ///
+    /// # Important
+    /// This method spawns the session-manager-plugin subprocess which takes over
+    /// the terminal. The caller (main.rs) must handle suspending/resuming the TUI
+    /// by disabling raw mode before calling this and re-enabling after.
+    pub async fn exec_into_task(&mut self) -> Result<()> {
+        if self.state != AppState::Tasks {
+            return Ok(());
+        }
+
+        if let Some(task) = self.tasks.get(self.selected_index) {
+            if let Some(cluster) = &self.selected_cluster {
+                let task_arn = task.task_arn.clone();
+                let task_id = task.task_id.clone();
+                let cluster_name = cluster.clone();
+
+                // Check if task has exec enabled
+                self.loading = true;
+                self.status_message = format!("Checking ECS Exec capability for task: {task_id}");
+
+                match self
+                    .ecs_client
+                    .check_task_exec_enabled(&cluster_name, &task_arn)
+                    .await
+                {
+                    Ok(false) => {
+                        self.loading = false;
+                        self.status_message = format!(
+                            "Task {task_id} does not have ECS Exec enabled. \
+                            Ensure the task definition and service have enableExecuteCommand=true"
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        self.loading = false;
+                        self.status_message = format!("Error checking ECS Exec: {e}");
+                        return Err(e);
+                    }
+                    Ok(true) => {
+                        // Continue - exec is enabled
+                    }
+                }
+
+                self.loading = false;
+                self.status_message =
+                    format!("Starting ECS Exec session for task: {task_id}...");
+
+                // Get the AWS region from current region
+                let region = self.current_region.clone();
+
+                // Start the exec session (this will block until session ends)
+                match self
+                    .ecs_client
+                    .start_exec_session(&cluster_name, &task_arn, None, &region)
+                    .await
+                {
+                    Ok(()) => {
+                        self.status_message = format!("ECS Exec session ended for task: {task_id}");
+                    }
+                    Err(e) => {
+                        self.status_message = format!("ECS Exec session failed: {e}");
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     // Search methods
     pub fn enter_search_mode(&mut self) {
         self.search_mode = true;

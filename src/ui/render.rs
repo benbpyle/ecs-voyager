@@ -538,12 +538,12 @@ fn draw_tasks(f: &mut Frame, area: Rect, app: &App) {
 
     let title = if app.search_query.is_empty() {
         format!(
-            "Tasks ({}) - /:search | l:logs | d:describe | x:stop",
+            "Tasks ({}) - /:search | e:exec | l:logs | d:describe | x:stop",
             filtered_tasks.len()
         )
     } else {
         format!(
-            "Tasks ({}/{}) - Esc:clear | l:logs | d:describe | x:stop",
+            "Tasks ({}/{}) - Esc:clear | e:exec | l:logs | d:describe | x:stop",
             filtered_tasks.len(),
             app.tasks.len()
         )
@@ -1098,6 +1098,10 @@ fn draw_help(f: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled("  J           ", Style::default().fg(Color::Yellow)),
             Span::raw("Toggle JSON view (in Details view)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  e           ", Style::default().fg(Color::Yellow)),
+            Span::raw("ECS Exec shell (from Tasks view)"),
         ]),
         Line::from(vec![
             Span::styled("  l           ", Style::default().fg(Color::Yellow)),

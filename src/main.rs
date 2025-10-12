@@ -117,7 +117,7 @@ async fn main() -> Result<()> {
 /// - In search mode: Handles character input, backspace, enter, and escape
 /// - In normal mode: Handles navigation (↑↓/jk), selection (Enter), view switching (1-3),
 ///   refresh (r), describe (d), logs (l), actions (x), and help (?)
-async fn run_app<B: ratatui::backend::Backend>(
+async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
     terminal: &mut Terminal<B>,
     app: &mut App,
 ) -> Result<()> {
@@ -218,8 +218,39 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 }
                             }
                             KeyCode::Char('e') => {
+                                // ECS Exec in tasks view
+                                if app.state == AppState::Tasks {
+                                    // Suspend TUI to hand terminal to session-manager-plugin
+                                    disable_raw_mode()?;
+                                    execute!(
+                                        terminal.backend_mut(),
+                                        LeaveAlternateScreen,
+                                        DisableMouseCapture
+                                    )?;
+                                    terminal.show_cursor()?;
+
+                                    // Run ECS Exec session (blocks until session ends)
+                                    let exec_result = app.exec_into_task().await;
+
+                                    // Resume TUI
+                                    terminal.hide_cursor()?;
+                                    execute!(
+                                        terminal.backend_mut(),
+                                        EnterAlternateScreen,
+                                        EnableMouseCapture
+                                    )?;
+                                    enable_raw_mode()?;
+
+                                    // Handle errors after resuming TUI
+                                    if let Err(e) = exec_result {
+                                        app.status_message = format!("ECS Exec error: {e}");
+                                    }
+
+                                    // Force a redraw after resuming
+                                    terminal.clear()?;
+                                }
                                 // Export logs in logs view
-                                if app.state == AppState::Logs {
+                                else if app.state == AppState::Logs {
                                     match app.export_logs() {
                                         Ok(path) => {
                                             app.status_message =
