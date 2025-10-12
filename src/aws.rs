@@ -1059,7 +1059,7 @@ impl EcsClient {
         if let Some(task) = resp.tasks().first() {
             Ok(task.enable_execute_command())
         } else {
-            anyhow::bail!("Task not found: {}", task_arn)
+            anyhow::bail!("Task not found: {task_arn}")
         }
     }
 
@@ -1115,7 +1115,7 @@ impl EcsClient {
                     anyhow::bail!("Task has no containers")
                 }
             } else {
-                anyhow::bail!("Task not found: {}", task_arn)
+                anyhow::bail!("Task not found: {task_arn}")
             }
         };
 
@@ -1133,9 +1133,9 @@ impl EcsClient {
             .context("Failed to execute command. Ensure ECS Exec is enabled on the task and IAM permissions are correct")?;
 
         // Extract session info
-        let session = resp.session().ok_or_else(|| {
-            anyhow::anyhow!("No session returned from ExecuteCommand API")
-        })?;
+        let session = resp
+            .session()
+            .ok_or_else(|| anyhow::anyhow!("No session returned from ExecuteCommand API"))?;
 
         Ok(Session {
             session_id: session
@@ -1186,8 +1186,7 @@ impl EcsClient {
         region: &str,
     ) -> Result<()> {
         // Step 1: Check if session-manager-plugin is installed
-        let plugin_check = std::process::Command::new("session-manager-plugin")
-            .output();
+        let plugin_check = std::process::Command::new("session-manager-plugin").output();
 
         if plugin_check.is_err() {
             anyhow::bail!(
@@ -1221,7 +1220,9 @@ impl EcsClient {
             .context("Failed to spawn session-manager-plugin")?;
 
         // Step 5: Wait for session to complete
-        let status = child.wait().context("Failed to wait for session-manager-plugin")?;
+        let status = child
+            .wait()
+            .context("Failed to wait for session-manager-plugin")?;
 
         if !status.success() {
             anyhow::bail!(
@@ -2014,7 +2015,11 @@ mod tests {
         let region = "us-east-1";
         let action = "StartSession";
 
-        let args = vec![session_json.to_string(), region.to_string(), action.to_string()];
+        let args = vec![
+            session_json.to_string(),
+            region.to_string(),
+            action.to_string(),
+        ];
 
         assert_eq!(args.len(), 3);
         assert!(args[0].contains("test-session"));
@@ -2069,7 +2074,7 @@ mod tests {
             "us-west-2",
             "eu-west-1",
             "ap-southeast-1",
-            "sa-east-1"
+            "sa-east-1",
         ];
 
         for region in regions {
