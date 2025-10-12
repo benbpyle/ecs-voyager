@@ -1123,8 +1123,7 @@ impl App {
                 }
 
                 self.loading = false;
-                self.status_message =
-                    format!("Starting ECS Exec session for task: {task_id}...");
+                self.status_message = format!("Starting ECS Exec session for task: {task_id}...");
 
                 // Get the AWS region from current region
                 let region = self.current_region.clone();

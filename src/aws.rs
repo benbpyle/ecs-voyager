@@ -1991,7 +1991,7 @@ mod tests {
     fn test_container_name_extraction_from_first_container() {
         // This tests the logic that would be used in execute_command
         // when no container name is specified
-        let containers = vec!["web", "sidecar", "logging"];
+        let containers = ["web", "sidecar", "logging"];
         let first_container = containers.first().unwrap();
         assert_eq!(*first_container, "web");
     }
@@ -2000,7 +2000,6 @@ mod tests {
     fn test_empty_container_list_handling() {
         let containers: Vec<&str> = vec![];
         assert!(containers.is_empty());
-        assert!(containers.first().is_none());
     }
 
     // Test session-manager-plugin command construction
@@ -2015,7 +2014,7 @@ mod tests {
         let region = "us-east-1";
         let action = "StartSession";
 
-        let args = vec![
+        let args = [
             session_json.to_string(),
             region.to_string(),
             action.to_string(),
@@ -2100,7 +2099,7 @@ mod tests {
 
     #[test]
     fn test_multiple_sessions() {
-        let sessions = vec![
+        let sessions = [
             Session {
                 session_id: "s1".to_string(),
                 stream_url: "url1".to_string(),
