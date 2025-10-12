@@ -232,6 +232,20 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                                     // Run ECS Exec session (blocks until session ends)
                                     let exec_result = app.exec_into_task().await;
 
+                                    // If there was an error, display it before resuming TUI
+                                    if let Err(ref e) = exec_result {
+                                        eprintln!("\n❌ ECS Exec Error: {e}\n");
+                                        eprintln!("Press Enter to return to ECS Voyager...");
+
+                                        // Wait for user to press Enter
+                                        let mut input = String::new();
+                                        let _ = std::io::stdin().read_line(&mut input);
+
+                                        app.status_message = format!("ECS Exec failed: {e}");
+                                    } else {
+                                        app.status_message = "ECS Exec session ended".to_string();
+                                    }
+
                                     // Resume TUI
                                     terminal.hide_cursor()?;
                                     execute!(
@@ -240,11 +254,6 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                                         EnableMouseCapture
                                     )?;
                                     enable_raw_mode()?;
-
-                                    // Handle errors after resuming TUI
-                                    if let Err(e) = exec_result {
-                                        app.status_message = format!("ECS Exec error: {e}");
-                                    }
 
                                     // Force a redraw after resuming
                                     terminal.clear()?;
