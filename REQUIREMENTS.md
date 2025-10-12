@@ -603,13 +603,194 @@ search = "/"
 
 ### Package Managers
 - [ ] crates.io publication
-- [ ] Homebrew formula (macOS/Linux)
-- [ ] APT repository (Debian/Ubuntu)
-- [ ] YUM/DNF repository (RHEL/Fedora)
-- [ ] Chocolatey (Windows)
+- [x] Homebrew formula (macOS/Linux) - Active
+- [ ] APT repository (Debian/Ubuntu) - See detailed requirements below
+- [ ] YUM/DNF repository (RHEL/Fedora) - See detailed requirements below
+- [ ] Chocolatey (Windows) - See detailed requirements below
 - [ ] Snap package (Linux)
 - [ ] AUR package (Arch Linux)
 - [ ] Docker Hub image
+
+#### Chocolatey Distribution (Windows)
+**Goal:** Enable easy Windows installation via `choco install ecs-voyager`
+
+**Repository Setup:**
+- [ ] Create Chocolatey package repository (or use community repo)
+- [ ] Set up GitHub repository for Chocolatey packages (`homebrew-tap` pattern)
+- [ ] Configure automated package updates via GitHub Actions
+
+**Package Requirements:**
+- [ ] Create `.nuspec` file with package metadata:
+  - Package ID: `ecs-voyager`
+  - Version (SemVer from git tags)
+  - Authors, description, license
+  - Dependencies (none for standalone binary)
+  - Release notes URL
+- [ ] Create `tools/chocolateyinstall.ps1` script:
+  - Download binary from GitHub releases
+  - Verify checksum (SHA256)
+  - Extract to `%ChocolateyInstall%\lib\ecs-voyager\tools`
+  - Add to PATH
+- [ ] Create `tools/chocolateyuninstall.ps1` script
+- [ ] Create `tools/LICENSE.txt` and `tools/VERIFICATION.txt`
+
+**Build & Publish Automation:**
+- [ ] GitHub Actions workflow triggered on new releases
+- [ ] Automatically generate `.nuspec` from template
+- [ ] Download Windows binary from release artifacts
+- [ ] Calculate SHA256 checksum
+- [ ] Package with `choco pack`
+- [ ] Push to Chocolatey repository with API key
+- [ ] Test installation on Windows Server 2019/2022
+
+**Testing:**
+- [ ] Test on Windows 10/11
+- [ ] Test on Windows Server 2019/2022
+- [ ] Test upgrade scenarios
+- [ ] Test uninstall cleanup
+- [ ] Verify PATH configuration
+
+**Documentation:**
+- [ ] Installation instructions in README
+- [ ] Troubleshooting guide
+- [ ] Minimum Windows version requirements
+
+#### APT Repository (Debian/Ubuntu)
+**Goal:** Enable installation via `apt-get install ecs-voyager`
+
+**Repository Setup:**
+- [ ] Create APT repository hosting (GitHub Pages or S3)
+- [ ] Set up GPG key for package signing
+- [ ] Configure repository structure:
+  - `dists/` - Distribution metadata
+  - `pool/` - Package files (.deb)
+- [ ] Support multiple Ubuntu/Debian versions:
+  - Ubuntu 20.04 LTS (focal)
+  - Ubuntu 22.04 LTS (jammy)
+  - Ubuntu 24.04 LTS (noble)
+  - Debian 11 (bullseye)
+  - Debian 12 (bookworm)
+
+**Package Requirements:**
+- [ ] Create `.deb` package with dpkg:
+  - Package name: `ecs-voyager`
+  - Architecture: amd64, arm64
+  - Maintainer information
+  - Description and homepage
+  - Dependencies: libc6, libssl3
+- [ ] Package structure:
+  - `/usr/bin/ecs-voyager` - Binary
+  - `/usr/share/man/man1/ecs-voyager.1.gz` - Man page
+  - `/usr/share/doc/ecs-voyager/` - Documentation
+  - `/usr/share/doc/ecs-voyager/copyright` - License
+  - `/usr/share/doc/ecs-voyager/changelog.Debian.gz` - Changelog
+- [ ] Create `DEBIAN/control` file with metadata
+- [ ] Create `DEBIAN/postinst` and `DEBIAN/prerm` scripts if needed
+
+**Build & Publish Automation:**
+- [ ] GitHub Actions workflow for .deb creation
+- [ ] Build .deb for amd64 and arm64
+- [ ] Sign packages with GPG key
+- [ ] Generate `Packages`, `Packages.gz`, and `Release` files
+- [ ] Upload to APT repository
+- [ ] Update repository metadata
+
+**Installation Setup:**
+- [ ] Provide repository setup script:
+  ```bash
+  curl -fsSL https://repo.example.com/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/ecs-voyager.gpg
+  echo "deb [signed-by=/usr/share/keyrings/ecs-voyager.gpg] https://repo.example.com/apt stable main" | sudo tee /etc/apt/sources.list.d/ecs-voyager.list
+  sudo apt-get update
+  sudo apt-get install ecs-voyager
+  ```
+
+**Testing:**
+- [ ] Test on Ubuntu 20.04, 22.04, 24.04
+- [ ] Test on Debian 11, 12
+- [ ] Test both amd64 and arm64 architectures
+- [ ] Test package upgrades
+- [ ] Test repository key trust
+- [ ] Test uninstall and purge
+
+**Documentation:**
+- [ ] APT installation guide in README
+- [ ] Repository setup instructions
+- [ ] Troubleshooting GPG key issues
+
+#### YUM/DNF Repository (RHEL/Fedora/CentOS)
+**Goal:** Enable installation via `dnf install ecs-voyager` or `yum install ecs-voyager`
+
+**Repository Setup:**
+- [ ] Create YUM/DNF repository (GitHub Pages or S3)
+- [ ] Set up GPG key for RPM signing
+- [ ] Configure repository structure:
+  - `repodata/` - Repository metadata
+  - `packages/` - RPM files
+- [ ] Support multiple distributions:
+  - RHEL 8, 9
+  - Rocky Linux 8, 9
+  - AlmaLinux 8, 9
+  - Fedora 38, 39, 40
+  - CentOS Stream 8, 9
+
+**Package Requirements:**
+- [ ] Create `.rpm` package with rpmbuild:
+  - Package name: `ecs-voyager`
+  - Architecture: x86_64, aarch64
+  - Vendor and maintainer information
+  - Summary and description
+  - Dependencies: glibc, openssl-libs
+- [ ] Create `.spec` file for rpmbuild:
+  - %description section
+  - %files section listing all installed files
+  - %install section for binary placement
+  - %changelog section
+- [ ] Package structure:
+  - `/usr/bin/ecs-voyager` - Binary
+  - `/usr/share/man/man1/ecs-voyager.1.gz` - Man page
+  - `/usr/share/doc/ecs-voyager/` - Documentation
+  - `/usr/share/licenses/ecs-voyager/LICENSE` - License
+
+**Build & Publish Automation:**
+- [ ] GitHub Actions workflow for RPM creation
+- [ ] Build RPM for x86_64 and aarch64
+- [ ] Sign RPMs with GPG key
+- [ ] Generate repository metadata with `createrepo_c`
+- [ ] Upload to YUM/DNF repository
+- [ ] Update repository metadata
+
+**Installation Setup:**
+- [ ] Provide repository setup script:
+  ```bash
+  sudo curl -fsSL https://repo.example.com/ecs-voyager.repo -o /etc/yum.repos.d/ecs-voyager.repo
+  sudo dnf install ecs-voyager
+  # or
+  sudo yum install ecs-voyager
+  ```
+- [ ] Repository `.repo` file format:
+  ```ini
+  [ecs-voyager]
+  name=ECS Voyager Repository
+  baseurl=https://repo.example.com/rpm/$releasever/$basearch
+  enabled=1
+  gpgcheck=1
+  gpgkey=https://repo.example.com/gpg.key
+  ```
+
+**Testing:**
+- [ ] Test on RHEL 8, 9
+- [ ] Test on Rocky Linux 8, 9
+- [ ] Test on Fedora 38, 39, 40
+- [ ] Test both x86_64 and aarch64 architectures
+- [ ] Test package updates with `dnf upgrade`
+- [ ] Test repository GPG verification
+- [ ] Test uninstall with `dnf remove`
+
+**Documentation:**
+- [ ] YUM/DNF installation guide in README
+- [ ] Repository setup instructions for different distros
+- [ ] SELinux considerations (if any)
+- [ ] Troubleshooting guide
 
 ### Container Distribution
 - [ ] Dockerfile for containerized usage
@@ -816,6 +997,54 @@ This roadmap prioritizes features that close the gap with e1s while leveraging o
 
 ---
 
+### Phase 7: Multi-Platform Distribution (Q3 2025)
+**Goal:** Make installation easy on all major platforms
+
+**Features:**
+- ✅ Section 12.1: Chocolatey Distribution (Windows)
+  - Create Chocolatey package with `.nuspec` and install scripts
+  - Automated build and publish via GitHub Actions
+  - Support for `choco install ecs-voyager`
+  - Test on Windows 10/11 and Server 2019/2022
+
+- ✅ Section 12.1: APT Repository (Debian/Ubuntu)
+  - Create `.deb` packages for amd64 and arm64
+  - Set up APT repository with GPG signing
+  - Support Ubuntu 20.04/22.04/24.04 and Debian 11/12
+  - Provide one-line installation script
+  - Test across all supported distributions
+
+- ✅ Section 12.1: YUM/DNF Repository (RHEL/Fedora)
+  - Create `.rpm` packages for x86_64 and aarch64
+  - Set up YUM/DNF repository with GPG signing
+  - Support RHEL 8/9, Rocky Linux, AlmaLinux, Fedora 38-40
+  - Provide repository setup script
+  - Test across all supported distributions
+
+- ✅ Section 12.1: Additional Distribution
+  - Publish to crates.io for Rust users
+  - Create Snap package for Linux
+  - Create AUR package for Arch Linux
+  - Docker Hub image with AWS credential pass-through
+
+**Dependencies:**
+- GitHub Actions for multi-platform builds
+- GPG keys for package signing
+- Repository hosting (GitHub Pages or S3)
+- Cross-platform testing infrastructure
+
+**Estimated Effort:** 3-4 weeks
+**Key Deliverable:** Installation available on all major platforms with one command
+
+**Success Criteria:**
+- `choco install ecs-voyager` works on Windows
+- `apt-get install ecs-voyager` works on Debian/Ubuntu
+- `dnf install ecs-voyager` works on RHEL/Fedora
+- `brew install ecs-voyager` works on macOS (already done)
+- `cargo install ecs-voyager` works for Rust users
+
+---
+
 ### Testing Strategy (Continuous)
 - **Unit tests:** >80% coverage target for all new features
 - **Integration tests:** Mock AWS SDK calls for all operations
@@ -828,7 +1057,9 @@ This roadmap prioritizes features that close the gap with e1s while leveraging o
 - **Performance:** Sub-second response for all operations
 - **Reliability:** Zero crashes, graceful error handling
 - **Testing:** >80% code coverage maintained
-- **Adoption:** 50+ GitHub stars, 10+ active contributors by Q3 2025
+- **Distribution:** Available on 5+ package managers (Homebrew, Chocolatey, APT, YUM, crates.io) by Q3 2025
+- **Adoption:** 100+ GitHub stars, 10+ active contributors by Q4 2025
+- **Cross-Platform:** Tested and working on macOS, Windows, Ubuntu, RHEL/Fedora
 
 ## Success Criteria
 
