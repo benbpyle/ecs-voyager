@@ -39,6 +39,8 @@ pub enum ModalState {
     ProfileSelector,
     /// Region selector modal
     RegionSelector,
+    /// Service editor modal
+    ServiceEditor,
 }
 
 /// Main application state container.
@@ -79,6 +81,18 @@ pub struct App {
     pub modal_state: ModalState,
     /// Selected index in modal lists
     pub modal_selected_index: usize,
+
+    // Service Editor
+    /// Input buffer for desired count in service editor
+    pub service_editor_desired_count_input: String,
+    /// Currently selected task definition revision index in service editor
+    pub service_editor_selected_revision: usize,
+    /// Available task definition revisions for service editor
+    pub service_editor_available_revisions: Vec<String>,
+    /// Current task definition for the service being edited
+    pub service_editor_current_task_def: String,
+    /// Which field is currently being edited (0=desired count, 1=task def)
+    pub service_editor_editing_field: usize,
 
     // Data
     /// List of ECS cluster names
@@ -339,6 +353,11 @@ impl App {
             available_regions,
             modal_state: ModalState::None,
             modal_selected_index: 0,
+            service_editor_desired_count_input: String::new(),
+            service_editor_selected_revision: 0,
+            service_editor_available_revisions: Vec::new(),
+            service_editor_current_task_def: String::new(),
+            service_editor_editing_field: 0,
             clusters: Vec::new(),
             services: Vec::new(),
             tasks: Vec::new(),
@@ -1367,6 +1386,169 @@ impl App {
         }
     }
 
+    /// Shows the service editor modal for the currently selected service.
+    ///
+    /// Loads the current service configuration and available task definition revisions.
+    /// Only works when a service is selected in the Services view.
+    pub async fn show_service_editor(&mut self) -> Result<()> {
+        // Only allow editing when we have a selected service
+        if self.selected_service.is_none() || self.selected_cluster.is_none() {
+            self.status_message = "No service selected".to_string();
+            return Ok(());
+        }
+
+        // Find the selected service to get current task definition
+        if let Some(service) = self.services.get(self.selected_index) {
+            // Extract task definition family from the service
+            // We'll need to get the full service details to know the task definition
+            let cluster = self.selected_cluster.as_ref().unwrap();
+            let service_name = self.selected_service.as_ref().unwrap();
+
+            // Initialize editor with current values
+            self.service_editor_desired_count_input = service.desired_count.to_string();
+            self.service_editor_editing_field = 0; // Start editing desired count
+
+            // Get full service details to extract task definition
+            let (details, _) = self
+                .ecs_client
+                .describe_service(cluster, service_name)
+                .await?;
+
+            // Extract task definition from details
+            if let Some(task_def_line) = details.lines().find(|l| l.starts_with("Task Definition:"))
+            {
+                let task_def = task_def_line
+                    .trim_start_matches("Task Definition:")
+                    .trim()
+                    .to_string();
+
+                self.service_editor_current_task_def = task_def.clone();
+
+                // Extract family name from task definition ARN
+                // Format: arn:aws:ecs:region:account:task-definition/family:revision
+                let family = if let Some(family_part) = task_def.split('/').next_back() {
+                    // Remove revision number (e.g., "my-task:1" -> "my-task")
+                    family_part.split(':').next().unwrap_or(family_part)
+                } else {
+                    ""
+                };
+
+                // Load available task definition revisions
+                if !family.is_empty() {
+                    self.loading = true;
+                    self.service_editor_available_revisions = self
+                        .ecs_client
+                        .list_task_definition_revisions(family)
+                        .await?;
+                    self.loading = false;
+
+                    // Find current task def in the list and select it
+                    if let Some(idx) = self
+                        .service_editor_available_revisions
+                        .iter()
+                        .position(|r| r.contains(&task_def))
+                    {
+                        self.service_editor_selected_revision = idx;
+                    }
+                }
+            }
+
+            self.modal_state = ModalState::ServiceEditor;
+            self.modal_selected_index = 0;
+        }
+
+        Ok(())
+    }
+
+    /// Saves changes made in the service editor.
+    ///
+    /// Applies the modified desired count and/or task definition to the service.
+    pub async fn save_service_changes(&mut self) -> Result<()> {
+        let cluster = match &self.selected_cluster {
+            Some(c) => c.clone(),
+            None => {
+                self.status_message = "No cluster selected".to_string();
+                return Ok(());
+            }
+        };
+
+        let service = match &self.selected_service {
+            Some(s) => s.clone(),
+            None => {
+                self.status_message = "No service selected".to_string();
+                return Ok(());
+            }
+        };
+
+        self.loading = true;
+        self.close_modal();
+
+        // Parse desired count from input
+        let desired_count = self
+            .service_editor_desired_count_input
+            .parse::<i32>()
+            .unwrap_or(0);
+
+        // Get selected task definition revision
+        let task_def = self
+            .service_editor_available_revisions
+            .get(self.service_editor_selected_revision)
+            .cloned();
+
+        // Determine what changes to make
+        let current_service = self.services.get(self.selected_index);
+        let count_changed = current_service
+            .map(|s| s.desired_count != desired_count)
+            .unwrap_or(false);
+        let task_def_changed = task_def
+            .as_ref()
+            .map(|td| !td.contains(&self.service_editor_current_task_def))
+            .unwrap_or(false);
+
+        // Apply changes
+        if count_changed && task_def_changed {
+            // Update both desired count and task definition
+            // AWS doesn't allow updating both in one call, so we do desired count first
+            self.ecs_client
+                .update_service_desired_count(&cluster, &service, desired_count)
+                .await?;
+
+            if let Some(task_definition) = task_def {
+                self.ecs_client
+                    .update_service_task_definition(&cluster, &service, &task_definition)
+                    .await?;
+            }
+
+            self.status_message = format!(
+                "Updated service {service}: desired count={desired_count}, new task definition"
+            );
+        } else if count_changed {
+            self.ecs_client
+                .update_service_desired_count(&cluster, &service, desired_count)
+                .await?;
+
+            self.status_message =
+                format!("Updated service {service}: desired count={desired_count}");
+        } else if task_def_changed {
+            if let Some(task_definition) = task_def {
+                self.ecs_client
+                    .update_service_task_definition(&cluster, &service, &task_definition)
+                    .await?;
+
+                self.status_message = format!("Updated service {service}: new task definition");
+            }
+        } else {
+            self.status_message = "No changes to apply".to_string();
+        }
+
+        // Refresh the services list to show updated values
+        self.loading = true;
+        self.refresh().await?;
+        self.loading = false;
+
+        Ok(())
+    }
+
     pub fn close_modal(&mut self) {
         self.modal_state = ModalState::None;
         self.modal_selected_index = 0;
@@ -1376,6 +1558,7 @@ impl App {
         let len = match self.modal_state {
             ModalState::ProfileSelector => self.available_profiles.len(),
             ModalState::RegionSelector => self.available_regions.len(),
+            ModalState::ServiceEditor => self.service_editor_available_revisions.len(),
             ModalState::None => 0,
         };
         if len > 0 {
@@ -1387,6 +1570,7 @@ impl App {
         let len = match self.modal_state {
             ModalState::ProfileSelector => self.available_profiles.len(),
             ModalState::RegionSelector => self.available_regions.len(),
+            ModalState::ServiceEditor => self.service_editor_available_revisions.len(),
             ModalState::None => 0,
         };
         if len > 0 {
@@ -1409,6 +1593,9 @@ impl App {
                 if let Some(region) = self.available_regions.get(self.modal_selected_index) {
                     self.switch_region(region.clone()).await?;
                 }
+            }
+            ModalState::ServiceEditor => {
+                self.save_service_changes().await?;
             }
             ModalState::None => {}
         }
@@ -1672,6 +1859,12 @@ mod tests {
             last_refresh: Instant::now(),
             auto_refresh_paused: false,
             auto_refresh_pause_time: None,
+            // Service Editor
+            service_editor_desired_count_input: String::new(),
+            service_editor_selected_revision: 0,
+            service_editor_available_revisions: vec![],
+            service_editor_current_task_def: String::new(),
+            service_editor_editing_field: 0,
         })
     }
 
@@ -2918,5 +3111,171 @@ mod tests {
         let filtered = app.get_filtered_tasks();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].task_id, "task-abc123");
+    }
+
+    // Service Editor Tests
+    #[test]
+    fn test_service_editor_modal_opens() {
+        let mut app = create_test_app();
+        app.modal_state = ModalState::ServiceEditor;
+
+        assert_eq!(app.modal_state, ModalState::ServiceEditor);
+    }
+
+    #[test]
+    fn test_service_editor_modal_closes() {
+        let mut app = create_test_app();
+        app.modal_state = ModalState::ServiceEditor;
+
+        app.close_modal();
+
+        assert_eq!(app.modal_state, ModalState::None);
+        assert_eq!(app.modal_selected_index, 0);
+    }
+
+    #[test]
+    fn test_service_editor_field_navigation_tab() {
+        let mut app = create_test_app();
+        app.modal_state = ModalState::ServiceEditor;
+        app.service_editor_editing_field = 0;
+
+        // Tab should cycle through fields
+        app.service_editor_editing_field = (app.service_editor_editing_field + 1) % 2;
+        assert_eq!(app.service_editor_editing_field, 1);
+
+        app.service_editor_editing_field = (app.service_editor_editing_field + 1) % 2;
+        assert_eq!(app.service_editor_editing_field, 0);
+    }
+
+    #[test]
+    fn test_service_editor_desired_count_input() {
+        let mut app = create_test_app();
+        app.modal_state = ModalState::ServiceEditor;
+        app.service_editor_editing_field = 0;
+
+        // Should accept numeric input
+        app.service_editor_desired_count_input.push('3');
+        assert_eq!(app.service_editor_desired_count_input, "3");
+
+        app.service_editor_desired_count_input.push('5');
+        assert_eq!(app.service_editor_desired_count_input, "35");
+    }
+
+    #[test]
+    fn test_service_editor_desired_count_backspace() {
+        let mut app = create_test_app();
+        app.modal_state = ModalState::ServiceEditor;
+        app.service_editor_editing_field = 0;
+        app.service_editor_desired_count_input = "123".to_string();
+
+        app.service_editor_desired_count_input.pop();
+        assert_eq!(app.service_editor_desired_count_input, "12");
+
+        app.service_editor_desired_count_input.pop();
+        assert_eq!(app.service_editor_desired_count_input, "1");
+
+        app.service_editor_desired_count_input.pop();
+        assert_eq!(app.service_editor_desired_count_input, "");
+    }
+
+    #[test]
+    fn test_service_editor_revision_navigation_up() {
+        let mut app = create_test_app();
+        app.modal_state = ModalState::ServiceEditor;
+        app.service_editor_editing_field = 1;
+        app.service_editor_available_revisions = vec![
+            "task-def:1".to_string(),
+            "task-def:2".to_string(),
+            "task-def:3".to_string(),
+        ];
+        app.service_editor_selected_revision = 2;
+
+        // Navigate up
+        if app.service_editor_selected_revision > 0 {
+            app.service_editor_selected_revision -= 1;
+        }
+        assert_eq!(app.service_editor_selected_revision, 1);
+
+        if app.service_editor_selected_revision > 0 {
+            app.service_editor_selected_revision -= 1;
+        }
+        assert_eq!(app.service_editor_selected_revision, 0);
+
+        // Should not go below 0
+        if app.service_editor_selected_revision > 0 {
+            app.service_editor_selected_revision -= 1;
+        }
+        assert_eq!(app.service_editor_selected_revision, 0);
+    }
+
+    #[test]
+    fn test_service_editor_revision_navigation_down() {
+        let mut app = create_test_app();
+        app.modal_state = ModalState::ServiceEditor;
+        app.service_editor_editing_field = 1;
+        app.service_editor_available_revisions = vec![
+            "task-def:1".to_string(),
+            "task-def:2".to_string(),
+            "task-def:3".to_string(),
+        ];
+        app.service_editor_selected_revision = 0;
+
+        // Navigate down
+        if app.service_editor_selected_revision + 1 < app.service_editor_available_revisions.len() {
+            app.service_editor_selected_revision += 1;
+        }
+        assert_eq!(app.service_editor_selected_revision, 1);
+
+        if app.service_editor_selected_revision + 1 < app.service_editor_available_revisions.len() {
+            app.service_editor_selected_revision += 1;
+        }
+        assert_eq!(app.service_editor_selected_revision, 2);
+
+        // Should not go beyond length
+        if app.service_editor_selected_revision + 1 < app.service_editor_available_revisions.len() {
+            app.service_editor_selected_revision += 1;
+        }
+        assert_eq!(app.service_editor_selected_revision, 2);
+    }
+
+    #[test]
+    fn test_service_editor_modal_next() {
+        let mut app = create_test_app();
+        app.modal_state = ModalState::ServiceEditor;
+        app.service_editor_available_revisions =
+            vec!["task-def:1".to_string(), "task-def:2".to_string()];
+        app.modal_selected_index = 0;
+
+        app.modal_next();
+        assert_eq!(app.modal_selected_index, 1);
+
+        app.modal_next();
+        assert_eq!(app.modal_selected_index, 0); // Wraps around
+    }
+
+    #[test]
+    fn test_service_editor_modal_previous() {
+        let mut app = create_test_app();
+        app.modal_state = ModalState::ServiceEditor;
+        app.service_editor_available_revisions =
+            vec!["task-def:1".to_string(), "task-def:2".to_string()];
+        app.modal_selected_index = 0;
+
+        app.modal_previous();
+        assert_eq!(app.modal_selected_index, 1); // Wraps around
+
+        app.modal_previous();
+        assert_eq!(app.modal_selected_index, 0);
+    }
+
+    #[test]
+    fn test_service_editor_initial_state() {
+        let app = create_test_app();
+
+        assert_eq!(app.service_editor_desired_count_input, "");
+        assert_eq!(app.service_editor_selected_revision, 0);
+        assert_eq!(app.service_editor_available_revisions.len(), 0);
+        assert_eq!(app.service_editor_current_task_def, "");
+        assert_eq!(app.service_editor_editing_field, 0);
     }
 }

@@ -129,12 +129,55 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                 if key.kind == KeyEventKind::Press {
                     // Handle modal input first
                     if app.modal_state != ModalState::None {
-                        match key.code {
-                            KeyCode::Up | KeyCode::Char('k') => app.modal_previous(),
-                            KeyCode::Down | KeyCode::Char('j') => app.modal_next(),
-                            KeyCode::Enter => app.modal_select().await?,
-                            KeyCode::Esc => app.close_modal(),
-                            _ => {}
+                        // Service Editor has special input handling
+                        if app.modal_state == ModalState::ServiceEditor {
+                            match key.code {
+                                // Tab switches between fields
+                                KeyCode::Tab => {
+                                    app.service_editor_editing_field =
+                                        (app.service_editor_editing_field + 1) % 2;
+                                }
+                                // Numeric input for desired count field
+                                KeyCode::Char(c)
+                                    if c.is_ascii_digit()
+                                        && app.service_editor_editing_field == 0 =>
+                                {
+                                    app.service_editor_desired_count_input.push(c);
+                                }
+                                // Backspace for desired count field
+                                KeyCode::Backspace if app.service_editor_editing_field == 0 => {
+                                    app.service_editor_desired_count_input.pop();
+                                }
+                                // Up/Down for task definition list when that field is active
+                                KeyCode::Up | KeyCode::Char('k')
+                                    if app.service_editor_editing_field == 1 =>
+                                {
+                                    if app.service_editor_selected_revision > 0 {
+                                        app.service_editor_selected_revision -= 1;
+                                    }
+                                }
+                                KeyCode::Down | KeyCode::Char('j')
+                                    if app.service_editor_editing_field == 1 =>
+                                {
+                                    if app.service_editor_selected_revision + 1
+                                        < app.service_editor_available_revisions.len()
+                                    {
+                                        app.service_editor_selected_revision += 1;
+                                    }
+                                }
+                                KeyCode::Enter => app.modal_select().await?,
+                                KeyCode::Esc => app.close_modal(),
+                                _ => {}
+                            }
+                        } else {
+                            // Standard modal navigation for other modals
+                            match key.code {
+                                KeyCode::Up | KeyCode::Char('k') => app.modal_previous(),
+                                KeyCode::Down | KeyCode::Char('j') => app.modal_next(),
+                                KeyCode::Enter => app.modal_select().await?,
+                                KeyCode::Esc => app.close_modal(),
+                                _ => {}
+                            }
                         }
                     }
                     // Handle search mode input
@@ -300,6 +343,12 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                                 // Cycle time range in Metrics view
                                 if app.state == AppState::Metrics {
                                     app.cycle_metrics_time_range().await?;
+                                }
+                            }
+                            KeyCode::Char('s') | KeyCode::Char('S') => {
+                                // Open service editor in Services view
+                                if app.state == AppState::Services {
+                                    app.show_service_editor().await?;
                                 }
                             }
                             KeyCode::Char('x') => app.execute_action().await?,
