@@ -72,14 +72,34 @@ jobs:
     strategy:
       matrix:
         include:
+          # macOS builds
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: ecs-voyager
             asset_name: ecs-voyager-${{ needs.create-tag.outputs.tag }}-x86_64-apple-darwin
+            archive_ext: tar.gz
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: ecs-voyager
             asset_name: ecs-voyager-${{ needs.create-tag.outputs.tag }}-aarch64-apple-darwin
+            archive_ext: tar.gz
+          # Linux builds
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: ecs-voyager
+            asset_name: ecs-voyager-${{ needs.create-tag.outputs.tag }}-x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: ecs-voyager
+            asset_name: ecs-voyager-${{ needs.create-tag.outputs.tag }}-aarch64-unknown-linux-gnu
+            archive_ext: tar.gz
+          # Windows build
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: ecs-voyager.exe
+            asset_name: ecs-voyager-${{ needs.create-tag.outputs.tag }}-x86_64-pc-windows-msvc
+            archive_ext: zip
 
     steps:
       - name: Checkout code
@@ -92,27 +112,150 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Install cross-compilation tools for Linux ARM64
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build release binary
         run: |
           cargo build --release --target ${{ matrix.target }}
+        env:
+          # For Linux ARM64 cross-compilation
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
-      - name: Strip binary (reduce size)
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
         run: |
           strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
-      - name: Create archive
+      # Create tarball for Unix systems
+      - name: Create tarball
+        if: matrix.archive_ext == 'tar.gz'
+        shell: bash
         run: |
           cd target/${{ matrix.target }}/release
           tar -czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
           shasum -a 256 ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
+
+      # Create ZIP for Windows
+      - name: Create ZIP archive
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path ${{ matrix.artifact_name }} -DestinationPath ${{ matrix.asset_name }}.zip
+          (Get-FileHash -Path ${{ matrix.asset_name }}.zip -Algorithm SHA256).Hash.ToLower() | Out-File -FilePath ${{ matrix.asset_name }}.zip.sha256 -NoNewline
 
       - name: Upload release archive
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.create-tag.outputs.tag }}
           files: |
-            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz
-            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.tar.gz.sha256
+            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.${{ matrix.archive_ext }}
+            target/${{ matrix.target }}/release/${{ matrix.asset_name }}.${{ matrix.archive_ext }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-deb-package:
+    name: Build Debian Package
+    needs: [create-tag, build-and-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.tag }}
+
+      - name: Download Linux x86_64 binary
+        run: |
+          VERSION="${{ needs.create-tag.outputs.tag }}"
+          curl -sL "https://github.com/benbpyle/ecs-voyager/releases/download/${VERSION}/ecs-voyager-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" -o linux-binary.tar.gz
+          tar -xzf linux-binary.tar.gz
+
+      - name: Update version in control file
+        run: |
+          VERSION="${{ needs.create-tag.outputs.version }}"
+          sed -i "s/Version: .*/Version: ${VERSION}/" packaging/debian/DEBIAN/control
+
+      - name: Prepare package structure
+        run: |
+          mkdir -p packaging/debian/usr/bin
+          cp ecs-voyager packaging/debian/usr/bin/
+          chmod 755 packaging/debian/usr/bin/ecs-voyager
+          chmod 755 packaging/debian/DEBIAN/postinst
+
+      - name: Build .deb package
+        run: |
+          VERSION="${{ needs.create-tag.outputs.version }}"
+          dpkg-deb --build packaging/debian ecs-voyager_${VERSION}_amd64.deb
+
+      - name: Calculate checksum
+        run: |
+          VERSION="${{ needs.create-tag.outputs.version }}"
+          shasum -a 256 ecs-voyager_${VERSION}_amd64.deb > ecs-voyager_${VERSION}_amd64.deb.sha256
+
+      - name: Upload .deb package to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.create-tag.outputs.tag }}
+          files: |
+            ecs-voyager_${{ needs.create-tag.outputs.version }}_amd64.deb
+            ecs-voyager_${{ needs.create-tag.outputs.version }}_amd64.deb.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-rpm-package:
+    name: Build RPM Package
+    needs: [create-tag, build-and-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.tag }}
+
+      - name: Install RPM build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Update version in spec file
+        run: |
+          VERSION="${{ needs.create-tag.outputs.version }}"
+          sed -i "s/Version: .*/Version: ${VERSION}/" packaging/rpm/ecs-voyager.spec
+
+      - name: Download Linux x86_64 tarball
+        run: |
+          VERSION="${{ needs.create-tag.outputs.tag }}"
+          mkdir -p ~/rpmbuild/SOURCES
+          curl -sL "https://github.com/benbpyle/ecs-voyager/releases/download/${VERSION}/ecs-voyager-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            -o ~/rpmbuild/SOURCES/ecs-voyager-${VERSION}-x86_64-unknown-linux-gnu.tar.gz
+
+      - name: Create RPM build environment
+        run: |
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          cp packaging/rpm/ecs-voyager.spec ~/rpmbuild/SPECS/
+
+      - name: Build RPM package
+        run: |
+          rpmbuild -ba ~/rpmbuild/SPECS/ecs-voyager.spec
+
+      - name: Copy RPM and calculate checksum
+        run: |
+          VERSION="${{ needs.create-tag.outputs.version }}"
+          cp ~/rpmbuild/RPMS/x86_64/ecs-voyager-${VERSION}-1.x86_64.rpm .
+          shasum -a 256 ecs-voyager-${VERSION}-1.x86_64.rpm > ecs-voyager-${VERSION}-1.x86_64.rpm.sha256
+
+      - name: Upload .rpm package to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.create-tag.outputs.tag }}
+          files: |
+            ecs-voyager-${{ needs.create-tag.outputs.version }}-1.x86_64.rpm
+            ecs-voyager-${{ needs.create-tag.outputs.version }}-1.x86_64.rpm.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -195,3 +338,36 @@ jobs:
             --body "Auto-generated PR to update formula" \
             --base main \
             --head "${BRANCH_NAME}"
+
+  create-checksums:
+    name: Create Consolidated SHA256SUMS
+    needs: [create-tag, build-and-release, build-deb-package, build-rpm-package]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.create-tag.outputs.tag }}"
+
+          # Download all artifacts from the release
+          gh release download "${VERSION}" --repo benbpyle/ecs-voyager --pattern "*.tar.gz"
+          gh release download "${VERSION}" --repo benbpyle/ecs-voyager --pattern "*.zip"
+          gh release download "${VERSION}" --repo benbpyle/ecs-voyager --pattern "*.deb"
+          gh release download "${VERSION}" --repo benbpyle/ecs-voyager --pattern "*.rpm"
+
+      - name: Create consolidated SHA256SUMS.txt
+        run: |
+          # Calculate checksums for all archives
+          shasum -a 256 *.tar.gz *.zip *.deb *.rpm 2>/dev/null | sort > SHA256SUMS.txt || true
+
+          echo "Generated SHA256SUMS.txt:"
+          cat SHA256SUMS.txt
+
+      - name: Upload SHA256SUMS.txt to release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.create-tag.outputs.tag }}
+          files: SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

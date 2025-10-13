@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>ecs-voyager</id>
+    <version>0.2.7</version>
+    <packageSourceUrl>https://github.com/benbpyle/ecs-voyager</packageSourceUrl>
+    <owners>benbpyle</owners>
+    <title>ECS Voyager</title>
+    <authors>benbpyle</authors>
+    <projectUrl>https://github.com/benbpyle/ecs-voyager</projectUrl>
+    <copyright>2024 benbpyle</copyright>
+    <licenseUrl>https://github.com/benbpyle/ecs-voyager/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/benbpyle/ecs-voyager</projectSourceUrl>
+    <bugTrackerUrl>https://github.com/benbpyle/ecs-voyager/issues</bugTrackerUrl>
+    <tags>ecs aws terminal tui cli kubernetes docker container monitoring devops</tags>
+    <summary>A powerful Terminal User Interface for AWS ECS Management</summary>
+    <description><![CDATA[
+# ECS Voyager
+
+A powerful Terminal User Interface (TUI) for managing AWS ECS (Elastic Container Service) clusters, services, and tasks. Built with Rust and ratatui.
+
+## Features
+
+- **Interactive TUI**: Beautiful, responsive terminal interface
+- **Cluster Management**: Browse and manage ECS clusters
+- **Service Operations**: View, restart, and update services
+- **Task Management**: Monitor tasks, view logs, and execute commands
+- **CloudWatch Integration**: View logs and metrics directly in the terminal
+- **ECS Exec**: Execute commands in running containers
+- **Port Forwarding**: Forward local ports to container ports
+- **Search & Filtering**: Powerful search with regex support
+- **Metrics Visualization**: View CPU and memory metrics with ASCII charts
+- **Profile & Region Switching**: Easily switch AWS profiles and regions
+
+## Requirements
+
+- AWS CLI configured with credentials
+- For ECS Exec and Port Forwarding: [session-manager-plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+
+## Usage
+
+Simply run `ecs-voyager` from your terminal. Use arrow keys or vim-style navigation (j/k) to navigate.
+
+Press '?' for help.
+]]></description>
+    <releaseNotes>https://github.com/benbpyle/ecs-voyager/releases/tag/v0.2.7</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

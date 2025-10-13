@@ -285,6 +285,7 @@ pub fn responsive_column_widths(terminal_width: u16, full_widths: &[u16]) -> Vec
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

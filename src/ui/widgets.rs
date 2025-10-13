@@ -75,7 +75,7 @@ pub fn render_spinner(f: &mut Frame, area: Option<Rect>, message: &str, theme: &
 pub fn get_spinner_frame() -> &'static str {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis();
 
     let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

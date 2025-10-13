@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use aws_sdk_cloudwatch::Client as CloudWatchClient;
 use aws_sdk_cloudwatchlogs::Client as LogsClient;
 use aws_sdk_ecs::Client;
+use aws_sdk_ssm::Client as SsmClient;
 
 /// Client for interacting with AWS ECS, CloudWatch Logs, and CloudWatch Metrics.
 ///
@@ -20,6 +21,8 @@ pub struct EcsClient {
     logs_client: LogsClient,
     /// AWS CloudWatch Metrics SDK client
     metrics_client: CloudWatchClient,
+    /// AWS Systems Manager SDK client (for ECS Exec and port forwarding)
+    ssm_client: SsmClient,
 }
 
 /// Represents a CloudWatch metric datapoint.
@@ -181,10 +184,12 @@ impl EcsClient {
         let client = Client::new(&config);
         let logs_client = LogsClient::new(&config);
         let metrics_client = CloudWatchClient::new(&config);
+        let ssm_client = SsmClient::new(&config);
         Ok(Self {
             client,
             logs_client,
             metrics_client,
+            ssm_client,
         })
     }
 
@@ -727,6 +732,31 @@ impl EcsClient {
             .context("Failed to list task definition revisions")?;
 
         Ok(resp.task_definition_arns().to_vec())
+    }
+
+    /// Lists all task definition families in the account.
+    ///
+    /// Returns a list of task definition family names (not ARNs).
+    /// Each family represents a logical grouping of task definition revisions.
+    ///
+    /// # Returns
+    /// A vector of task definition family names sorted alphabetically
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The AWS API call fails
+    /// - Insufficient permissions to list task definition families
+    pub async fn list_task_definition_families(&self) -> Result<Vec<String>> {
+        let resp = self
+            .client
+            .list_task_definition_families()
+            .send()
+            .await
+            .context("Failed to list task definition families")?;
+
+        let mut families: Vec<String> = resp.families().to_vec();
+        families.sort();
+        Ok(families)
     }
 
     /// Stops a specific task in a cluster.
@@ -1334,9 +1364,172 @@ impl EcsClient {
 
         Ok(())
     }
+
+    /// Starts a port forwarding session using AWS SSM.
+    ///
+    /// Opens a local port that forwards traffic to a remote port on the ECS task.
+    /// Uses AWS Systems Manager Session Manager's port forwarding feature.
+    ///
+    /// # Arguments
+    /// * `cluster` - The cluster name or ARN
+    /// * `task_arn` - The full task ARN
+    /// * `local_port` - The local port number to listen on
+    /// * `remote_port` - The remote port number on the task to forward to
+    /// * `region` - AWS region for the session
+    ///
+    /// # Returns
+    /// Returns `Ok(())` when the session ends normally
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - session-manager-plugin is not installed
+    /// - The task doesn't have a valid runtime ID for port forwarding
+    /// - SSM start_session API call fails
+    /// - Plugin process fails to start or exits with error
+    /// - Invalid port numbers provided
+    pub async fn start_port_forwarding(
+        &self,
+        cluster: &str,
+        task_arn: &str,
+        local_port: u16,
+        remote_port: u16,
+        region: &str,
+    ) -> Result<()> {
+        // Step 1: Check if session-manager-plugin is installed
+        let plugin_check = std::process::Command::new("session-manager-plugin").output();
+
+        if plugin_check.is_err() {
+            anyhow::bail!(
+                "session-manager-plugin not found. Please install it:\n\
+                macOS: brew install --cask session-manager-plugin\n\
+                Linux: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html"
+            );
+        }
+
+        // Step 2: Get task details to build the SSM target
+        let task_resp = self
+            .client
+            .describe_tasks()
+            .cluster(cluster)
+            .tasks(task_arn)
+            .send()
+            .await?;
+
+        let task = task_resp
+            .tasks()
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("Task not found: {task_arn}"))?;
+
+        // Check if ECS Exec is enabled (required for port forwarding)
+        if !task.enable_execute_command() {
+            anyhow::bail!(
+                "ECS Exec is not enabled on this task. Port forwarding requires ECS Exec.\n\n\
+                To enable ECS Exec on new tasks:\n\
+                1. Update the service: aws ecs update-service --cluster {cluster} --service <service-name> --enable-execute-command\n\
+                2. Force new deployment to restart tasks with Exec enabled\n\n\
+                For existing tasks, you'll need to stop them and let the service start new ones with Exec enabled."
+            );
+        }
+
+        eprintln!("✓ ECS Exec is enabled on task");
+
+        // Extract task ID from ARN
+        let task_id = task_arn
+            .split('/')
+            .next_back()
+            .ok_or_else(|| anyhow::anyhow!("Could not extract task ID from ARN"))?;
+
+        // Build the SSM target
+        // For ECS tasks, the target format is: ecs:cluster-name_task-id_runtime-id
+        let runtime_id = if let Some(container_instance_arn) = task.container_instance_arn() {
+            // For EC2 launch type, use container instance ID
+            container_instance_arn
+                .split('/')
+                .next_back()
+                .unwrap_or(container_instance_arn)
+        } else {
+            // For Fargate, use the task ID as runtime ID
+            task_id
+        };
+
+        let target = format!("ecs:{cluster}_{task_id}_{runtime_id}");
+
+        eprintln!("\nStarting port forwarding session...");
+        eprintln!("Target: {target}");
+        eprintln!("Local port {local_port} -> Remote port {remote_port}");
+
+        // Step 3: Call SSM start_session to get session credentials
+        let session_resp = self
+            .ssm_client
+            .start_session()
+            .target(&target)
+            .document_name("AWS-StartPortForwardingSession")
+            .parameters("portNumber", vec![remote_port.to_string()])
+            .parameters("localPortNumber", vec![local_port.to_string()])
+            .send()
+            .await
+            .map_err(|e| {
+                eprintln!("\nSSM API Error Details: {e:?}\n");
+                anyhow::anyhow!(
+                    "Failed to start SSM port forwarding session: {e}\n\n\
+                    Common causes:\n\
+                    1. Task doesn't have ECS Exec enabled (check with: aws ecs describe-tasks)\n\
+                    2. Task IAM role missing SSM permissions (ssmmessages:CreateControlChannel, etc.)\n\
+                    3. Security group doesn't allow egress to SSM endpoints\n\
+                    4. For Fargate: Task must have ECS Exec enabled and proper network configuration\n\
+                    5. For EC2: Container instance must have SSM agent running"
+                )
+            })?;
+
+        // Step 4: Extract session info
+        let session_id = session_resp
+            .session_id()
+            .ok_or_else(|| anyhow::anyhow!("No session ID in response"))?;
+        let token_value = session_resp
+            .token_value()
+            .ok_or_else(|| anyhow::anyhow!("No token value in response"))?;
+        let stream_url = session_resp
+            .stream_url()
+            .ok_or_else(|| anyhow::anyhow!("No stream URL in response"))?;
+
+        // Step 5: Create session JSON for plugin
+        let session_json = serde_json::json!({
+            "SessionId": session_id,
+            "TokenValue": token_value,
+            "StreamUrl": stream_url
+        });
+
+        eprintln!("Session established. Press Ctrl+C to end the session\n");
+
+        // Step 6: Spawn session-manager-plugin subprocess
+        let mut child = std::process::Command::new("session-manager-plugin")
+            .arg(session_json.to_string())
+            .arg(region)
+            .arg("StartSession")
+            .stdin(std::process::Stdio::inherit())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+            .context("Failed to spawn session-manager-plugin")?;
+
+        // Step 7: Wait for session to complete
+        let status = child
+            .wait()
+            .context("Failed to wait for session-manager-plugin")?;
+
+        if !status.success() {
+            anyhow::bail!(
+                "session-manager-plugin exited with code: {}",
+                status.code().unwrap_or(-1)
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

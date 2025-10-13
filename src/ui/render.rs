@@ -26,31 +26,55 @@ use crate::charts::{render_chart, ChartConfig, ChartDatapoint};
 /// * `f` - The ratatui Frame to render into
 /// * `app` - The application state containing data to display
 pub fn draw(f: &mut Frame, app: &App) {
+    // Calculate info header height based on view
+    let info_header_height = if app.show_help {
+        0
+    } else {
+        match app.state {
+            AppState::Clusters | AppState::Services | AppState::Tasks => 3,
+            AppState::Logs | AppState::Details => 3,
+            _ => 0,
+        }
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Header
-            Constraint::Min(0),    // Content
-            Constraint::Length(5), // Footer (multi-line)
+            Constraint::Length(3),                  // Header
+            Constraint::Length(info_header_height), // Info header (context)
+            Constraint::Min(0),                     // Content
+            Constraint::Length(5),                  // Footer (multi-line)
         ])
         .split(f.area());
 
     draw_header(f, chunks[0], app);
 
+    // Draw info header if applicable
+    if info_header_height > 0 {
+        draw_info_header(f, chunks[1], app);
+    }
+
+    // Content is always chunks[2] regardless of info_header_height
+    // (when info_header_height is 0, chunks[1] exists but has 0 height)
+    let content_area = chunks[2];
+
     if app.show_help {
-        draw_help(f, chunks[1]);
+        draw_help(f, content_area);
     } else {
         match app.state {
-            AppState::Clusters => draw_clusters(f, chunks[1], app),
-            AppState::Services => draw_services(f, chunks[1], app),
-            AppState::Tasks => draw_tasks(f, chunks[1], app),
-            AppState::Details => draw_details(f, chunks[1], app),
-            AppState::Logs => draw_logs(f, chunks[1], app),
-            AppState::Metrics => draw_metrics(f, chunks[1], app),
+            AppState::Clusters => draw_clusters(f, content_area, app),
+            AppState::Services => draw_services(f, content_area, app),
+            AppState::Tasks => draw_tasks(f, content_area, app),
+            AppState::Details => draw_details(f, content_area, app),
+            AppState::Logs => draw_logs(f, content_area, app),
+            AppState::Metrics => draw_metrics(f, content_area, app),
+            AppState::TaskDefinitions => draw_task_definitions(f, content_area, app),
+            AppState::TaskDefinitionDetail => draw_details(f, content_area, app),
         }
     }
 
-    draw_footer(f, chunks[2], app);
+    // Footer is always chunks[3]
+    draw_footer(f, chunks[3], app);
 
     // Draw search input if in search mode
     if app.search_mode {
@@ -62,6 +86,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         ModalState::ProfileSelector => draw_profile_selector(f, app),
         ModalState::RegionSelector => draw_region_selector(f, app),
         ModalState::ServiceEditor => draw_service_editor(f, app),
+        ModalState::PortForwardingSetup => draw_port_forwarding_setup(f, app),
         ModalState::None => {}
     }
 
@@ -85,7 +110,12 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
         AppState::Clusters => "ECS Voyager - Clusters",
         AppState::Services => {
             if let Some(cluster) = &app.selected_cluster {
-                return draw_custom_header(f, area, &format!("ECS Voyager - Services ({cluster})"));
+                return draw_custom_header(
+                    f,
+                    area,
+                    &format!("ECS Voyager - Services ({cluster})"),
+                    app,
+                );
             }
             "ECS Voyager - Services"
         }
@@ -95,6 +125,7 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
                     f,
                     area,
                     &format!("ECS Voyager - Tasks ({cluster}/{service})"),
+                    app,
                 );
             }
             "ECS Voyager - Tasks"
@@ -106,6 +137,7 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
                     f,
                     area,
                     &format!("ECS Voyager - Logs (Task: {})", task.task_id),
+                    app,
                 );
             }
             "ECS Voyager - Logs"
@@ -116,25 +148,36 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
                     f,
                     area,
                     &format!("ECS Voyager - Metrics (Service: {service})"),
+                    app,
                 );
             }
             "ECS Voyager - Metrics"
         }
+        AppState::TaskDefinitions => "ECS Voyager - Task Definitions",
+        AppState::TaskDefinitionDetail => "ECS Voyager - Task Definition Details",
     };
 
-    draw_custom_header(f, area, title);
+    draw_custom_header(f, area, title, app);
 }
 
 /// Renders a header with a custom title string.
 ///
 /// Helper function that creates a styled paragraph for the header.
+/// If read-only mode is enabled, adds a [READ-ONLY] badge to the title.
 ///
 /// # Arguments
 /// * `f` - The ratatui Frame to render into
 /// * `area` - The rectangular area allocated for the header
 /// * `title` - The title text to display
-fn draw_custom_header(f: &mut Frame, area: Rect, title: &str) {
-    let header = Paragraph::new(title)
+/// * `app` - The application state to check for read-only mode
+fn draw_custom_header(f: &mut Frame, area: Rect, title: &str, app: &App) {
+    let title_text = if app.config.behavior.read_only {
+        format!("{title} [READ-ONLY]")
+    } else {
+        title.to_string()
+    };
+
+    let header = Paragraph::new(title_text)
         .style(
             Style::default()
                 .fg(Color::Cyan)
@@ -142,6 +185,340 @@ fn draw_custom_header(f: &mut Frame, area: Rect, title: &str) {
         )
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(header, area);
+}
+
+/// Renders the info header showing overview information for the current view.
+///
+/// Displays context-specific information based on the current view:
+/// - Clusters: Region, profile, total count
+/// - Services: Cluster info, service counts and aggregates
+/// - Tasks: Service info, task counts by status
+/// - Logs/Details: Selected resource context
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the info header
+/// * `app` - The application state
+fn draw_info_header(f: &mut Frame, area: Rect, app: &App) {
+    let content = match app.state {
+        AppState::Clusters => {
+            // Show region, profile, and cluster count
+            vec![Line::from(vec![
+                Span::styled("Region: ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    &app.current_region,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Profile: ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    &app.current_profile,
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Total Clusters: ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    app.clusters.len().to_string(),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])]
+        }
+        AppState::Services => {
+            // Show cluster info, service counts and aggregates
+            let cluster_name = app.selected_cluster.as_deref().unwrap_or("None selected");
+            let total_services = app.services.len();
+
+            // Calculate aggregate stats
+            let total_desired: i32 = app.services.iter().map(|s| s.desired_count).sum();
+            let total_running: i32 = app.services.iter().map(|s| s.running_count).sum();
+            let total_pending: i32 = app.services.iter().map(|s| s.pending_count).sum();
+
+            // Count by status
+            let active_count = app
+                .services
+                .iter()
+                .filter(|s| s.status.to_uppercase() == "ACTIVE")
+                .count();
+            let draining_count = app
+                .services
+                .iter()
+                .filter(|s| s.status.to_uppercase() == "DRAINING")
+                .count();
+
+            // Count by launch type
+            let fargate_count = app
+                .services
+                .iter()
+                .filter(|s| s.launch_type.to_uppercase() == "FARGATE")
+                .count();
+            let ec2_count = app
+                .services
+                .iter()
+                .filter(|s| s.launch_type.to_uppercase() == "EC2")
+                .count();
+
+            vec![
+                Line::from(vec![
+                    Span::styled("Cluster: ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        cluster_name,
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Services: ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        total_services.to_string(),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" (Active: {active_count}, Draining: {draining_count})"),
+                        Style::default().fg(Color::Gray),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("Tasks: ", Style::default().fg(Color::Gray)),
+                    Span::styled("Desired: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(total_desired.to_string(), Style::default().fg(Color::White)),
+                    Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Running: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(total_running.to_string(), Style::default().fg(Color::Green)),
+                    Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Pending: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        total_pending.to_string(),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Launch Types: ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        format!("Fargate: {fargate_count}, EC2: {ec2_count}"),
+                        Style::default().fg(Color::White),
+                    ),
+                ]),
+            ]
+        }
+        AppState::Tasks => {
+            // Show service info, task counts by status
+            let cluster_name = app.selected_cluster.as_deref().unwrap_or("None selected");
+            let service_name = app.selected_service.as_deref().unwrap_or("None selected");
+            let total_tasks = app.tasks.len();
+
+            // Count by status
+            let running_count = app
+                .tasks
+                .iter()
+                .filter(|t| t.status.to_uppercase() == "RUNNING")
+                .count();
+            let pending_count = app
+                .tasks
+                .iter()
+                .filter(|t| t.status.to_uppercase() == "PENDING")
+                .count();
+            let stopped_count = app
+                .tasks
+                .iter()
+                .filter(|t| t.status.to_uppercase() == "STOPPED")
+                .count();
+            let other_count = total_tasks - running_count - pending_count - stopped_count;
+
+            vec![
+                Line::from(vec![
+                    Span::styled("Cluster: ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        cluster_name,
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Service: ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        service_name,
+                        Style::default()
+                            .fg(Color::Magenta)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("Total Tasks: ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        total_tasks.to_string(),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Running: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(running_count.to_string(), Style::default().fg(Color::Green)),
+                    Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Pending: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        pending_count.to_string(),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("Stopped: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(stopped_count.to_string(), Style::default().fg(Color::Red)),
+                    if other_count > 0 {
+                        Span::styled(
+                            format!("  |  Other: {other_count}"),
+                            Style::default().fg(Color::Gray),
+                        )
+                    } else {
+                        Span::styled("", Style::default())
+                    },
+                ]),
+            ]
+        }
+        AppState::Logs => {
+            // Show task context and log info
+            if let Some(task) = &app.selected_task {
+                let filtered_logs = app.get_filtered_logs();
+                let log_count_display = if filtered_logs.len() != app.logs.len() {
+                    format!("{}/{}", filtered_logs.len(), app.logs.len())
+                } else {
+                    app.logs.len().to_string()
+                };
+
+                vec![
+                    Line::from(vec![
+                        Span::styled("Task: ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            &task.task_id,
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                        Span::styled("Status: ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            &task.status,
+                            Style::default().fg(if task.status.to_uppercase() == "RUNNING" {
+                                Color::Green
+                            } else {
+                                Color::Yellow
+                            }),
+                        ),
+                        Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                        Span::styled("CPU: ", Style::default().fg(Color::Gray)),
+                        Span::styled(&task.cpu, Style::default().fg(Color::White)),
+                        Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                        Span::styled("Memory: ", Style::default().fg(Color::Gray)),
+                        Span::styled(&task.memory, Style::default().fg(Color::White)),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("Log Entries: ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            log_count_display,
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        if app.auto_tail {
+                            Span::styled("  |  Auto-Tail: ON", Style::default().fg(Color::Green))
+                        } else {
+                            Span::styled(
+                                "  |  Auto-Tail: OFF",
+                                Style::default().fg(Color::DarkGray),
+                            )
+                        },
+                    ]),
+                ]
+            } else {
+                vec![Line::from(vec![Span::styled(
+                    "No task selected",
+                    Style::default().fg(Color::Yellow),
+                )])]
+            }
+        }
+        AppState::Details => {
+            // Show resource context based on what's selected
+            if let Some(task) = &app.selected_task {
+                vec![
+                    Line::from(vec![
+                        Span::styled("Task Details: ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            &task.task_id,
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                        Span::styled("Status: ", Style::default().fg(Color::Gray)),
+                        Span::styled(
+                            &task.status,
+                            Style::default().fg(if task.status.to_uppercase() == "RUNNING" {
+                                Color::Green
+                            } else {
+                                Color::Yellow
+                            }),
+                        ),
+                    ]),
+                    Line::from(vec![
+                        Span::styled("CPU: ", Style::default().fg(Color::Gray)),
+                        Span::styled(&task.cpu, Style::default().fg(Color::White)),
+                        Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                        Span::styled("Memory: ", Style::default().fg(Color::Gray)),
+                        Span::styled(&task.memory, Style::default().fg(Color::White)),
+                        Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            if app.show_json_view {
+                                "View: JSON"
+                            } else {
+                                "View: Formatted"
+                            },
+                            Style::default().fg(Color::Magenta),
+                        ),
+                    ]),
+                ]
+            } else if let Some(service) = &app.selected_service {
+                vec![Line::from(vec![
+                    Span::styled("Service Details: ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        service,
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        if app.show_json_view {
+                            "View: JSON"
+                        } else {
+                            "View: Formatted"
+                        },
+                        Style::default().fg(Color::Magenta),
+                    ),
+                ])]
+            } else {
+                vec![Line::from(vec![Span::styled(
+                    "Resource Details",
+                    Style::default().fg(Color::Gray),
+                )])]
+            }
+        }
+        _ => vec![],
+    };
+
+    let info_header = Paragraph::new(content)
+        .style(Style::default().fg(Color::White))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
+
+    f.render_widget(info_header, area);
 }
 
 /// Renders the footer section with keybindings and status information.
@@ -253,6 +630,8 @@ fn draw_footer(f: &mut Frame, area: Rect, app: &App) {
             AppState::Logs => format!("{} logs", app.logs.len()),
             AppState::Details => "details".to_string(),
             AppState::Metrics => "metrics".to_string(),
+            AppState::TaskDefinitions => format!("{} families", app.task_definition_families.len()),
+            AppState::TaskDefinitionDetail => "task definition".to_string(),
         };
 
         let line2 = Line::from(vec![
@@ -567,6 +946,53 @@ fn draw_tasks(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(table, area);
 }
 
+/// Renders the task definitions list view.
+///
+/// Displays all ECS task definition families (filtered by search query if active) as a vertical list.
+/// The currently selected family is highlighted. Shows count of filtered vs total families.
+///
+/// # Arguments
+/// * `f` - The ratatui Frame to render into
+/// * `area` - The rectangular area allocated for the task definitions list
+/// * `app` - The application state containing task definition family data
+fn draw_task_definitions(f: &mut Frame, area: Rect, app: &App) {
+    let filtered_families = app.get_filtered_task_definition_families();
+
+    let items: Vec<ListItem> = filtered_families
+        .iter()
+        .enumerate()
+        .map(|(i, family)| {
+            let style = if i == app.selected_index {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            ListItem::new(family.as_str()).style(style)
+        })
+        .collect();
+
+    let title = if app.search_query.is_empty() {
+        format!(
+            "Task Definition Families ({}) - /:search | Enter:view | d:describe",
+            filtered_families.len()
+        )
+    } else {
+        format!(
+            "Task Definition Families ({}/{}) - Esc:clear | Enter:view | d:describe",
+            filtered_families.len(),
+            app.task_definition_families.len()
+        )
+    };
+
+    let list = List::new(items).block(Block::default().title(title).borders(Borders::ALL));
+
+    f.render_widget(list, area);
+}
+
 /// Renders the details view showing comprehensive information about a resource.
 ///
 /// Displays detailed information about a selected service or task in a scrollable
@@ -719,7 +1145,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 /// * `area` - The rectangular area allocated for the metrics view
 /// * `app` - The application state containing metrics data
 fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
-    if app.metrics.is_none() {
+    let Some(metrics) = app.metrics.as_ref() else {
         let no_metrics = Paragraph::new("No metrics available for this service.\n\nThis could mean:\n- The service has no CloudWatch metrics enabled\n- The service hasn't been running long enough to generate metrics\n- There was an error fetching metrics\n\nPress 'm' from Services view to load metrics")
             .style(Style::default().fg(Color::Yellow))
             .block(
@@ -730,9 +1156,7 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
             .wrap(Wrap { trim: false });
         f.render_widget(no_metrics, area);
         return;
-    }
-
-    let metrics = app.metrics.as_ref().unwrap();
+    };
 
     // Split area into alarms section and charts section
     let chunks = Layout::default()
@@ -1293,7 +1717,7 @@ fn get_spinner() -> &'static str {
     // Get current time in milliseconds and cycle through spinner frames
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis();
 
     let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -1589,4 +2013,124 @@ fn draw_service_editor(f: &mut Frame, app: &App) {
             .block(Block::default().borders(Borders::ALL));
         f.render_widget(no_revisions, chunks[4]);
     }
+}
+
+/// Renders the port forwarding setup modal.
+///
+/// Displays a centered modal dialog with fields to configure port forwarding:
+/// - Local port number input field
+/// - Remote port number input field
+fn draw_port_forwarding_setup(f: &mut Frame, app: &App) {
+    let area = f.area();
+    let width = 60.min(area.width.saturating_sub(4));
+    let height = 12;
+
+    let modal_area = Rect {
+        x: area.width.saturating_sub(width) / 2,
+        y: area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+
+    // Clear the area behind the modal
+    f.render_widget(Clear, modal_area);
+
+    // Create main container
+    let block = Block::default()
+        .title("Port Forwarding Setup (Tab:switch field | Enter:start | Esc:cancel)")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().bg(Color::Black));
+
+    f.render_widget(block, modal_area);
+
+    // Split the modal into sections
+    let inner = modal_area.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Task info
+            Constraint::Length(3), // Local port field
+            Constraint::Length(3), // Remote port field
+        ])
+        .split(inner);
+
+    // Task info display
+    let task_id = app
+        .selected_task
+        .as_ref()
+        .map(|t| t.task_id.as_str())
+        .unwrap_or("Unknown");
+    let task_info = Paragraph::new(format!("Task: {task_id}")).style(
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    );
+    f.render_widget(task_info, chunks[0]);
+
+    // Local port input field
+    let local_port_style = if app.port_forward_editing_field == 0 {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let local_port_text = format!(
+        "Local Port:  {}{}",
+        app.port_forward_local_port,
+        if app.port_forward_editing_field == 0 {
+            "█"
+        } else {
+            ""
+        }
+    );
+
+    let local_port_widget = Paragraph::new(local_port_text)
+        .style(local_port_style)
+        .block(Block::default().borders(Borders::ALL).border_style(
+            if app.port_forward_editing_field == 0 {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default().fg(Color::Gray)
+            },
+        ));
+    f.render_widget(local_port_widget, chunks[1]);
+
+    // Remote port input field
+    let remote_port_style = if app.port_forward_editing_field == 1 {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let remote_port_text = format!(
+        "Remote Port: {}{}",
+        app.port_forward_remote_port,
+        if app.port_forward_editing_field == 1 {
+            "█"
+        } else {
+            ""
+        }
+    );
+
+    let remote_port_widget = Paragraph::new(remote_port_text)
+        .style(remote_port_style)
+        .block(Block::default().borders(Borders::ALL).border_style(
+            if app.port_forward_editing_field == 1 {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default().fg(Color::Gray)
+            },
+        ));
+    f.render_widget(remote_port_widget, chunks[2]);
 }
