@@ -1,0 +1,23 @@
+Package: ecs-voyager
+Version: 0.2.7
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: benbpyle <https://github.com/benbpyle>
+Homepage: https://github.com/benbpyle/ecs-voyager
+Vcs-Git: https://github.com/benbpyle/ecs-voyager.git
+Vcs-Browser: https://github.com/benbpyle/ecs-voyager
+Depends: libc6 (>= 2.31)
+Recommends: awscli, session-manager-plugin
+Description: Terminal User Interface for AWS ECS Management
+ ECS Voyager is a powerful Terminal User Interface (TUI) for managing
+ AWS ECS (Elastic Container Service) clusters, services, and tasks.
+ .
+ Features:
+  * Interactive TUI with beautiful, responsive interface
+  * Cluster, service, and task management
+  * CloudWatch logs and metrics integration
+  * ECS Exec for running commands in containers
+  * Port forwarding to container ports
+  * Search and filtering with regex support
+  * Profile and region switching

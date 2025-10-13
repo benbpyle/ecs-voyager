@@ -38,15 +38,25 @@ use std::io;
 /// - Terminal restoration fails on cleanup
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Handle --version flag
+    // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
+
+    // Handle --version flag
     if args.len() > 1 && (args[1] == "--version" || args[1] == "-V") {
         println!("ecs-voyager {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
 
+    // Check for --read-only flag
+    let read_only_flag = args.iter().any(|arg| arg == "--read-only" || arg == "-r");
+
     // Load configuration
-    let config = Config::load()?;
+    let mut config = Config::load()?;
+
+    // CLI flag overrides config file
+    if read_only_flag {
+        config.behavior.read_only = true;
+    }
 
     // Setup terminal
     enable_raw_mode()?;
@@ -129,8 +139,79 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                 if key.kind == KeyEventKind::Press {
                     // Handle modal input first
                     if app.modal_state != ModalState::None {
+                        // Port Forwarding Setup has special input handling
+                        if app.modal_state == ModalState::PortForwardingSetup {
+                            match key.code {
+                                // Tab switches between fields
+                                KeyCode::Tab => {
+                                    app.port_forward_editing_field =
+                                        (app.port_forward_editing_field + 1) % 2;
+                                }
+                                // Numeric input for both port fields
+                                KeyCode::Char(c) if c.is_ascii_digit() => {
+                                    if app.port_forward_editing_field == 0 {
+                                        app.port_forward_local_port.push(c);
+                                    } else {
+                                        app.port_forward_remote_port.push(c);
+                                    }
+                                }
+                                // Backspace for both port fields
+                                KeyCode::Backspace => {
+                                    if app.port_forward_editing_field == 0 {
+                                        app.port_forward_local_port.pop();
+                                    } else {
+                                        app.port_forward_remote_port.pop();
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    // Close modal before starting session
+                                    app.close_modal();
+
+                                    // Port forwarding needs to suspend TUI
+                                    // Suspend TUI to hand terminal to session-manager-plugin
+                                    disable_raw_mode()?;
+                                    execute!(
+                                        terminal.backend_mut(),
+                                        LeaveAlternateScreen,
+                                        DisableMouseCapture
+                                    )?;
+                                    terminal.show_cursor()?;
+
+                                    // Run port forwarding session (blocks until session ends)
+                                    let pf_result = app.start_port_forwarding().await;
+
+                                    // If there was an error, display it before resuming TUI
+                                    if let Err(ref e) = pf_result {
+                                        eprintln!("\n❌ Port Forwarding Error: {e}\n");
+                                        eprintln!("Press Enter to return to ECS Voyager...");
+
+                                        // Wait for user to press Enter
+                                        let mut input = String::new();
+                                        let _ = std::io::stdin().read_line(&mut input);
+
+                                        app.status_message = format!("Port forwarding failed: {e}");
+                                    } else {
+                                        app.status_message = "Port forwarding session ended".to_string();
+                                    }
+
+                                    // Resume TUI
+                                    terminal.hide_cursor()?;
+                                    execute!(
+                                        terminal.backend_mut(),
+                                        EnterAlternateScreen,
+                                        EnableMouseCapture
+                                    )?;
+                                    enable_raw_mode()?;
+
+                                    // Force a redraw after resuming
+                                    terminal.clear()?;
+                                }
+                                KeyCode::Esc => app.close_modal(),
+                                _ => {}
+                            }
+                        }
                         // Service Editor has special input handling
-                        if app.modal_state == ModalState::ServiceEditor {
+                        else if app.modal_state == ModalState::ServiceEditor {
                             match key.code {
                                 // Tab switches between fields
                                 KeyCode::Tab => {
@@ -209,7 +290,7 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                             KeyCode::Char('/') => {
                                 // Enable search in list views or log search in logs view
                                 match app.state {
-                                    AppState::Clusters | AppState::Services | AppState::Tasks => {
+                                    AppState::Clusters | AppState::Services | AppState::Tasks | AppState::TaskDefinitions => {
                                         app.enter_search_mode();
                                     }
                                     AppState::Logs => {
@@ -247,6 +328,7 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                                 if app.state == AppState::Clusters
                                     || app.state == AppState::Services
                                     || app.state == AppState::Tasks
+                                    || app.state == AppState::TaskDefinitions
                                 {
                                     app.clear_all_filters();
                                 }
@@ -256,6 +338,7 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                                 if app.state == AppState::Clusters
                                     || app.state == AppState::Services
                                     || app.state == AppState::Tasks
+                                    || app.state == AppState::TaskDefinitions
                                 {
                                     app.toggle_regex_mode();
                                 }
@@ -314,10 +397,23 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                                     }
                                 }
                             }
+                            KeyCode::Char('p') => {
+                                // Port forwarding setup in tasks view
+                                if app.state == AppState::Tasks {
+                                    app.show_port_forwarding_setup();
+                                }
+                            }
                             KeyCode::Char('?') => app.toggle_help(),
                             KeyCode::Char('1') => app.set_view(AppState::Clusters),
                             KeyCode::Char('2') => app.set_view(AppState::Services),
                             KeyCode::Char('3') => app.set_view(AppState::Tasks),
+                            KeyCode::Char('4') => {
+                                app.set_view(AppState::TaskDefinitions);
+                                // Load task definition families if not already loaded
+                                if app.task_definition_families.is_empty() {
+                                    app.refresh().await?;
+                                }
+                            }
                             KeyCode::Up | KeyCode::Char('k') => app.previous(),
                             KeyCode::Down | KeyCode::Char('j') => app.next(),
                             KeyCode::Enter => app.select().await?,

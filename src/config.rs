@@ -62,6 +62,10 @@ pub struct BehaviorConfig {
     /// Default view to show on startup (e.g., "clusters", "services", "tasks")
     #[serde(default = "default_view")]
     pub default_view: String,
+
+    /// Enable read-only mode (prevents destructive actions)
+    #[serde(default = "default_false")]
+    pub read_only: bool,
 }
 
 /// UI configuration options.
@@ -167,6 +171,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_false() -> bool {
+    false
+}
+
 fn default_export_dir() -> String {
     "~/Downloads".to_string()
 }
@@ -187,6 +195,7 @@ impl Default for BehaviorConfig {
             auto_refresh: default_auto_refresh(),
             refresh_interval: default_refresh_interval(),
             default_view: default_view(),
+            read_only: default_false(),
         }
     }
 }
@@ -319,6 +328,10 @@ refresh_interval = 30
 # Options: "clusters", "services", "tasks"
 default_view = "clusters"
 
+# Enable read-only mode (prevents destructive actions like restart, stop, update)
+# Can be overridden with --read-only or -r CLI flag
+read_only = false
+
 [ui]
 # Color theme preset
 # Options: "dark", "light", "custom"
@@ -416,6 +429,7 @@ mod tests {
         assert!(config.behavior.auto_refresh);
         assert_eq!(config.behavior.refresh_interval, 30);
         assert_eq!(config.behavior.default_view, "clusters");
+        assert!(!config.behavior.read_only);
         assert_eq!(config.ui.theme, "dark");
         assert!(config.metrics.enabled);
         assert_eq!(config.metrics.time_range_minutes, 60);

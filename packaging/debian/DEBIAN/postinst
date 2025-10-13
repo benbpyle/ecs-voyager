@@ -1,0 +1,14 @@
+#!/bin/bash
+set -e
+
+echo ""
+echo "ECS Voyager has been installed!"
+echo ""
+echo "Usage: ecs-voyager"
+echo "       ecs-voyager --help"
+echo ""
+echo "For ECS Exec and Port Forwarding features, install session-manager-plugin:"
+echo "  See: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html"
+echo ""
+
+exit 0

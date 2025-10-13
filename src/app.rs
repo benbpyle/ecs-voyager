@@ -3,7 +3,7 @@
 //! This module defines the core application state, data structures for ECS resources,
 //! and methods for navigating between views and managing data.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::time::{Duration, Instant};
 
 use crate::aws::{EcsClient, Metrics, TimeRange};
@@ -28,6 +28,11 @@ pub enum AppState {
     Logs,
     /// View showing CloudWatch metrics for a service
     Metrics,
+    /// View showing list of task definition families
+    TaskDefinitions,
+    /// View showing details of a specific task definition (planned for future release)
+    #[allow(dead_code)]
+    TaskDefinitionDetail,
 }
 
 /// Represents modal dialogs that can be shown over the main view.
@@ -41,6 +46,8 @@ pub enum ModalState {
     RegionSelector,
     /// Service editor modal
     ServiceEditor,
+    /// Port forwarding setup modal
+    PortForwardingSetup,
 }
 
 /// Main application state container.
@@ -93,6 +100,12 @@ pub struct App {
     pub service_editor_current_task_def: String,
     /// Which field is currently being edited (0=desired count, 1=task def)
     pub service_editor_editing_field: usize,
+    /// Local port number input for port forwarding
+    pub port_forward_local_port: String,
+    /// Remote port number input for port forwarding
+    pub port_forward_remote_port: String,
+    /// Which field is currently being edited (0=local port, 1=remote port)
+    pub port_forward_editing_field: usize,
 
     // Data
     /// List of ECS cluster names
@@ -125,6 +138,15 @@ pub struct App {
     pub metrics: Option<Metrics>,
     /// Current scroll position in metrics view
     pub metrics_scroll: usize,
+    /// List of task definition families
+    pub task_definition_families: Vec<String>,
+    /// List of task definition revisions for selected family (planned for future release)
+    #[allow(dead_code)]
+    pub task_definitions: Vec<TaskDefinitionInfo>,
+    /// Currently selected task definition family
+    pub selected_task_definition_family: Option<String>,
+    /// Currently selected task definition
+    pub selected_task_definition: Option<TaskDefinitionInfo>,
 
     // Search
     /// Whether search input mode is active
@@ -201,6 +223,26 @@ pub struct TaskInfo {
     pub cpu: String,
     /// Memory (MB) allocated to task
     pub memory: String,
+}
+
+/// Information about an ECS task definition.
+///
+/// Contains task definition metadata including family, revision, and status.
+/// Planned for future task definition detail viewer.
+#[derive(Debug, Clone)]
+pub struct TaskDefinitionInfo {
+    /// Task definition family name
+    #[allow(dead_code)]
+    pub family: String,
+    /// Revision number
+    #[allow(dead_code)]
+    pub revision: i32,
+    /// Full ARN of the task definition
+    #[allow(dead_code)]
+    pub arn: String,
+    /// Status (ACTIVE or INACTIVE)
+    #[allow(dead_code)]
+    pub status: String,
 }
 
 /// Log level parsed from log message.
@@ -358,6 +400,9 @@ impl App {
             service_editor_available_revisions: Vec::new(),
             service_editor_current_task_def: String::new(),
             service_editor_editing_field: 0,
+            port_forward_local_port: String::new(),
+            port_forward_remote_port: String::new(),
+            port_forward_editing_field: 0,
             clusters: Vec::new(),
             services: Vec::new(),
             tasks: Vec::new(),
@@ -373,6 +418,10 @@ impl App {
             auto_tail: true,
             metrics: None,
             metrics_scroll: 0,
+            task_definition_families: Vec::new(),
+            task_definitions: Vec::new(),
+            selected_task_definition_family: None,
+            selected_task_definition: None,
             search_mode: false,
             search_query: String::new(),
             search_regex_mode: false,
@@ -427,10 +476,11 @@ impl App {
         self.pause_auto_refresh();
 
         let len = match self.state {
-            AppState::Clusters => self.clusters.len(),
-            AppState::Services => self.services.len(),
-            AppState::Tasks => self.tasks.len(),
-            AppState::Details => {
+            AppState::Clusters => self.get_filtered_clusters().len(),
+            AppState::Services => self.get_filtered_services().len(),
+            AppState::Tasks => self.get_filtered_tasks().len(),
+            AppState::TaskDefinitions => self.get_filtered_task_definition_families().len(),
+            AppState::Details | AppState::TaskDefinitionDetail => {
                 // Scroll down in details view
                 self.details_scroll = self.details_scroll.saturating_add(1);
                 return;
@@ -460,10 +510,11 @@ impl App {
         self.pause_auto_refresh();
 
         let len = match self.state {
-            AppState::Clusters => self.clusters.len(),
-            AppState::Services => self.services.len(),
-            AppState::Tasks => self.tasks.len(),
-            AppState::Details => {
+            AppState::Clusters => self.get_filtered_clusters().len(),
+            AppState::Services => self.get_filtered_services().len(),
+            AppState::Tasks => self.get_filtered_tasks().len(),
+            AppState::TaskDefinitions => self.get_filtered_task_definition_families().len(),
+            AppState::Details | AppState::TaskDefinitionDetail => {
                 // Scroll up in details view
                 self.details_scroll = self.details_scroll.saturating_sub(1);
                 return;
@@ -536,7 +587,16 @@ impl App {
                     }
                 }
             }
-            AppState::Details => {}
+            AppState::TaskDefinitions => {
+                // Get the family from the filtered list (to handle search correctly)
+                let filtered_families = self.get_filtered_task_definition_families();
+                if let Some(family) = filtered_families.get(self.selected_index) {
+                    self.selected_task_definition_family = Some(family.clone());
+                    self.status_message = format!("Selected task definition family: {family}");
+                    // TODO: Load revisions for this family and navigate to TaskDefinitionDetail view
+                }
+            }
+            AppState::Details | AppState::TaskDefinitionDetail => {}
             AppState::Logs => {}
             AppState::Metrics => {}
         }
@@ -567,7 +627,12 @@ impl App {
                 self.metrics = None;
                 self.metrics_scroll = 0;
             }
-            AppState::Clusters => {}
+            AppState::TaskDefinitionDetail => {
+                self.set_view(AppState::TaskDefinitions);
+                self.selected_task_definition = None;
+                self.details = None;
+            }
+            AppState::Clusters | AppState::TaskDefinitions => {}
         }
     }
 
@@ -678,6 +743,25 @@ impl App {
                     }
                 }
             }
+            AppState::TaskDefinitions => {
+                self.status_message = "Refreshing task definition families...".to_string();
+                match self.ecs_client.list_task_definition_families().await {
+                    Ok(families) => {
+                        self.task_definition_families = families;
+                        self.status_message = format!(
+                            "Loaded {} task definition families",
+                            self.task_definition_families.len()
+                        );
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Error loading task definition families: {e}");
+                    }
+                }
+            }
+            AppState::TaskDefinitionDetail => {
+                // Placeholder - will be implemented with full task definition viewer
+                self.status_message = "Task definition detail refresh not yet implemented".to_string();
+            }
         }
 
         self.loading = false;
@@ -730,6 +814,12 @@ impl App {
     }
 
     pub async fn execute_action(&mut self) -> Result<()> {
+        // Block destructive actions in read-only mode
+        if self.config.behavior.read_only {
+            self.status_message = "Read-only mode enabled - cannot perform this action".to_string();
+            return Ok(());
+        }
+
         match self.state {
             AppState::Services => {
                 if let Some(service) = self.services.get(self.selected_index) {
@@ -1359,6 +1449,35 @@ impl App {
         filtered
     }
 
+    /// Returns filtered task definition families based on search query and regex mode
+    pub fn get_filtered_task_definition_families(&self) -> Vec<String> {
+        if self.search_query.is_empty() {
+            return self.task_definition_families.clone();
+        }
+
+        if self.search_regex_mode {
+            // Use regex matching
+            if let Ok(re) = regex::Regex::new(&self.search_query) {
+                self.task_definition_families
+                    .iter()
+                    .filter(|family| re.is_match(family))
+                    .cloned()
+                    .collect()
+            } else {
+                // Invalid regex, return all families
+                self.task_definition_families.clone()
+            }
+        } else {
+            // Use simple substring matching (case-insensitive)
+            let query_lower = self.search_query.to_lowercase();
+            self.task_definition_families
+                .iter()
+                .filter(|family| family.to_lowercase().contains(&query_lower))
+                .cloned()
+                .collect()
+        }
+    }
+
     // Modal management methods
     pub fn show_profile_selector(&mut self) {
         self.modal_state = ModalState::ProfileSelector;
@@ -1391,6 +1510,12 @@ impl App {
     /// Loads the current service configuration and available task definition revisions.
     /// Only works when a service is selected in the Services view.
     pub async fn show_service_editor(&mut self) -> Result<()> {
+        // Block service editing in read-only mode
+        if self.config.behavior.read_only {
+            self.status_message = "Read-only mode enabled - cannot edit services".to_string();
+            return Ok(());
+        }
+
         // Only allow editing when we have a selected service
         if self.selected_service.is_none() || self.selected_cluster.is_none() {
             self.status_message = "No service selected".to_string();
@@ -1464,6 +1589,13 @@ impl App {
     ///
     /// Applies the modified desired count and/or task definition to the service.
     pub async fn save_service_changes(&mut self) -> Result<()> {
+        // Block service updates in read-only mode (defensive check)
+        if self.config.behavior.read_only {
+            self.status_message = "Read-only mode enabled - cannot save changes".to_string();
+            self.close_modal();
+            return Ok(());
+        }
+
         let cluster = match &self.selected_cluster {
             Some(c) => c.clone(),
             None => {
@@ -1549,6 +1681,75 @@ impl App {
         Ok(())
     }
 
+    /// Shows the port forwarding setup modal for the selected task.
+    ///
+    /// Allows user to specify local and remote ports for forwarding.
+    pub fn show_port_forwarding_setup(&mut self) {
+        // Only allow port forwarding when we're in the Tasks view with a cluster selected
+        if self.state != AppState::Tasks || self.selected_cluster.is_none() {
+            self.status_message = "No task selected".to_string();
+            return;
+        }
+
+        // Get the currently highlighted task
+        let filtered_tasks = self.get_filtered_tasks();
+        if self.selected_index >= filtered_tasks.len() {
+            self.status_message = "No task selected".to_string();
+            return;
+        }
+
+        // Store the selected task for port forwarding
+        self.selected_task = Some(filtered_tasks[self.selected_index].clone());
+
+        // Initialize with default ports (local=8080, remote=80)
+        self.port_forward_local_port = "8080".to_string();
+        self.port_forward_remote_port = "80".to_string();
+        self.port_forward_editing_field = 0; // Start editing local port
+
+        self.modal_state = ModalState::PortForwardingSetup;
+        self.modal_selected_index = 0;
+    }
+
+    /// Starts a port forwarding session using AWS SSM.
+    ///
+    /// Opens a local port that forwards to a remote port on the ECS task.
+    /// This runs in a blocking manner - the terminal is suspended while the session is active.
+    pub async fn start_port_forwarding(&mut self) -> Result<()> {
+        let cluster = self
+            .selected_cluster
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("No cluster selected"))?;
+
+        let task = self
+            .selected_task
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("No task selected"))?;
+
+        // Parse ports
+        let local_port = self
+            .port_forward_local_port
+            .parse::<u16>()
+            .context("Invalid local port number")?;
+
+        let remote_port = self
+            .port_forward_remote_port
+            .parse::<u16>()
+            .context("Invalid remote port number")?;
+
+        // Start port forwarding session (modal is closed by caller in main.rs)
+        self.ecs_client
+            .start_port_forwarding(
+                &cluster,
+                &task.task_arn,
+                local_port,
+                remote_port,
+                &self.current_region,
+            )
+            .await?;
+
+        Ok(())
+    }
+
     pub fn close_modal(&mut self) {
         self.modal_state = ModalState::None;
         self.modal_selected_index = 0;
@@ -1559,6 +1760,7 @@ impl App {
             ModalState::ProfileSelector => self.available_profiles.len(),
             ModalState::RegionSelector => self.available_regions.len(),
             ModalState::ServiceEditor => self.service_editor_available_revisions.len(),
+            ModalState::PortForwardingSetup => 0, // Handled by field navigation
             ModalState::None => 0,
         };
         if len > 0 {
@@ -1571,6 +1773,7 @@ impl App {
             ModalState::ProfileSelector => self.available_profiles.len(),
             ModalState::RegionSelector => self.available_regions.len(),
             ModalState::ServiceEditor => self.service_editor_available_revisions.len(),
+            ModalState::PortForwardingSetup => 0, // Handled by field navigation
             ModalState::None => 0,
         };
         if len > 0 {
@@ -1596,6 +1799,10 @@ impl App {
             }
             ModalState::ServiceEditor => {
                 self.save_service_changes().await?;
+            }
+            ModalState::PortForwardingSetup => {
+                // Port forwarding is handled directly in main.rs event loop
+                // because it needs to suspend/resume the TUI
             }
             ModalState::None => {}
         }
@@ -1726,6 +1933,7 @@ mod tests {
                 auto_refresh: true,
                 refresh_interval: 30,
                 default_view: "clusters".to_string(),
+                read_only: false,
             },
             ui: UiConfig {
                 theme: "dark".to_string(),
@@ -1845,6 +2053,10 @@ mod tests {
             auto_tail: true,
             metrics: None,
             metrics_scroll: 0,
+            task_definition_families: Vec::new(),
+            task_definitions: Vec::new(),
+            selected_task_definition_family: None,
+            selected_task_definition: None,
             search_mode: false,
             search_query: String::new(),
             search_regex_mode: false,
@@ -1865,6 +2077,10 @@ mod tests {
             service_editor_available_revisions: vec![],
             service_editor_current_task_def: String::new(),
             service_editor_editing_field: 0,
+            // Port Forwarding
+            port_forward_local_port: String::new(),
+            port_forward_remote_port: String::new(),
+            port_forward_editing_field: 0,
         })
     }
 
