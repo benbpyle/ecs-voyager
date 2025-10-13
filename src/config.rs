@@ -1,7 +1,7 @@
 //! Configuration management for ECS Voyager.
 //!
 //! This module handles loading and managing application configuration from a TOML file
-//! located at `~/.ecs-voyager/config.toml`. Configuration includes AWS settings,
+//! located at `~/.config/ecs-voyager/config.toml`. Configuration includes AWS settings,
 //! application behavior, and UI preferences.
 
 use anyhow::{Context, Result};
@@ -227,13 +227,13 @@ impl Default for MetricsConfig {
 }
 
 impl Config {
-    /// Returns the path to the configuration directory (~/.ecs-voyager/)
+    /// Returns the path to the configuration directory (~/.config/ecs-voyager/)
     pub fn config_dir() -> Result<PathBuf> {
         let home_dir = dirs::home_dir().context("Failed to determine home directory")?;
-        Ok(home_dir.join(".ecs-voyager"))
+        Ok(home_dir.join(".config").join("ecs-voyager"))
     }
 
-    /// Returns the path to the configuration file (~/.ecs-voyager/config.toml)
+    /// Returns the path to the configuration file (~/.config/ecs-voyager/config.toml)
     pub fn config_file_path() -> Result<PathBuf> {
         Ok(Self::config_dir()?.join("config.toml"))
     }
@@ -272,7 +272,7 @@ impl Config {
         }
     }
 
-    /// Creates a default configuration file at ~/.ecs-voyager/config.toml
+    /// Creates a default configuration file at ~/.config/ecs-voyager/config.toml
     ///
     /// This function will create the config directory if it doesn't exist, then
     /// write a default configuration file with helpful comments.

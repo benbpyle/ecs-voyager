@@ -6,10 +6,10 @@
 
 use chrono::{DateTime, Local};
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Row, Table, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Row, Table, Wrap},
     Frame,
 };
 use std::time::SystemTime;
@@ -61,6 +61,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     match app.modal_state {
         ModalState::ProfileSelector => draw_profile_selector(f, app),
         ModalState::RegionSelector => draw_region_selector(f, app),
+        ModalState::ServiceEditor => draw_service_editor(f, app),
         ModalState::None => {}
     }
 
@@ -460,12 +461,12 @@ fn draw_services(f: &mut Frame, area: Rect, app: &App) {
 
     let title = if app.search_query.is_empty() {
         format!(
-            "Services ({}) - /:search | Enter:tasks | d:describe | x:restart",
+            "Services ({}) - /:search | s:edit | Enter:tasks | d:describe | x:restart",
             filtered_services.len()
         )
     } else {
         format!(
-            "Services ({}/{}) - Esc:clear | Enter:tasks | d:describe | x:restart",
+            "Services ({}/{}) - Esc:clear | s:edit | Enter:tasks | d:describe | x:restart",
             filtered_services.len(),
             app.services.len()
         )
@@ -1112,6 +1113,10 @@ fn draw_help(f: &mut Frame, area: Rect) {
             Span::raw("View metrics (from Services view)"),
         ]),
         Line::from(vec![
+            Span::styled("  s           ", Style::default().fg(Color::Yellow)),
+            Span::raw("Edit service (from Services view)"),
+        ]),
+        Line::from(vec![
             Span::styled("  T           ", Style::default().fg(Color::Yellow)),
             Span::raw("Cycle time range (in Metrics view: 1h/6h/24h/7d)"),
         ]),
@@ -1424,4 +1429,164 @@ fn draw_region_selector(f: &mut Frame, app: &App) {
     );
 
     f.render_widget(list, modal_area);
+}
+
+/// Renders the service editor modal.
+///
+/// Displays a centered modal dialog with fields to edit the service configuration:
+/// - Desired Count input field
+/// - Task Definition revision selector
+fn draw_service_editor(f: &mut Frame, app: &App) {
+    use ratatui::layout::Constraint;
+    use ratatui::widgets::Paragraph;
+
+    let area = f.area();
+    let width = 80.min(area.width.saturating_sub(4));
+
+    // Calculate height based on number of task definition revisions
+    let revisions_count = app.service_editor_available_revisions.len().min(10);
+    let height = (revisions_count + 12) as u16; // 12 = header + fields + padding
+
+    let modal_area = Rect {
+        x: area.width.saturating_sub(width) / 2,
+        y: area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+
+    // Clear the area behind the modal
+    f.render_widget(Clear, modal_area);
+
+    // Create main container
+    let block = Block::default()
+        .title("Edit Service (Tab:switch field | Enter:save | Esc:cancel)")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().bg(Color::Black));
+
+    f.render_widget(block, modal_area);
+
+    // Split the modal into sections
+    let inner = modal_area.inner(Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Service info
+            Constraint::Length(3), // Desired count field
+            Constraint::Length(1), // Spacing
+            Constraint::Length(2), // Task definition label
+            Constraint::Min(5),    // Task definition list
+        ])
+        .split(inner);
+
+    // Service name display
+    let service_name = app.selected_service.as_deref().unwrap_or("Unknown");
+    let service_info = Paragraph::new(format!("Service: {service_name}")).style(
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    );
+    f.render_widget(service_info, chunks[0]);
+
+    // Desired Count input field
+    let desired_count_style = if app.service_editor_editing_field == 0 {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let desired_count_text = format!(
+        "Desired Count: {}{}",
+        app.service_editor_desired_count_input,
+        if app.service_editor_editing_field == 0 {
+            "█"
+        } else {
+            ""
+        }
+    );
+
+    let desired_count_widget = Paragraph::new(desired_count_text)
+        .style(desired_count_style)
+        .block(Block::default().borders(Borders::ALL).border_style(
+            if app.service_editor_editing_field == 0 {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default().fg(Color::Gray)
+            },
+        ));
+    f.render_widget(desired_count_widget, chunks[1]);
+
+    // Task Definition label
+    let task_def_label = Paragraph::new("Task Definition Revision:").style(
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    );
+    f.render_widget(task_def_label, chunks[3]);
+
+    // Task Definition revision list
+    if !app.service_editor_available_revisions.is_empty() {
+        let items: Vec<ListItem> = app
+            .service_editor_available_revisions
+            .iter()
+            .enumerate()
+            .map(|(i, revision)| {
+                // Extract just the family:revision part from the ARN
+                let display_revision = revision.split('/').next_back().unwrap_or(revision);
+
+                let is_current = revision.contains(&app.service_editor_current_task_def);
+                let is_selected = i == app.service_editor_selected_revision;
+
+                let style = if is_selected && app.service_editor_editing_field == 1 {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
+                } else if is_current {
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+
+                let prefix = if is_current { "● " } else { "  " };
+
+                ListItem::new(format!("{prefix}{display_revision}")).style(style)
+            })
+            .collect();
+
+        // Create a stateful list
+        let mut list_state = ListState::default();
+        list_state.select(Some(app.service_editor_selected_revision));
+
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).border_style(
+                if app.service_editor_editing_field == 1 {
+                    Style::default().fg(Color::Cyan)
+                } else {
+                    Style::default().fg(Color::Gray)
+                },
+            ))
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            );
+
+        f.render_stateful_widget(list, chunks[4], &mut list_state);
+    } else {
+        let no_revisions = Paragraph::new("No task definition revisions found")
+            .style(Style::default().fg(Color::Yellow))
+            .block(Block::default().borders(Borders::ALL));
+        f.render_widget(no_revisions, chunks[4]);
+    }
 }

@@ -628,6 +628,107 @@ impl EcsClient {
         Ok(())
     }
 
+    /// Updates the desired count for a service.
+    ///
+    /// Changes the number of tasks that should be running for the service.
+    /// This is useful for scaling a service up or down.
+    ///
+    /// # Arguments
+    /// * `cluster` - The cluster name or ARN
+    /// * `service` - The service name or ARN
+    /// * `desired_count` - The new desired task count
+    ///
+    /// # Returns
+    /// Returns `Ok(())` on success
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The AWS UpdateService API call fails
+    /// - The service doesn't exist
+    /// - The desired count is invalid (negative)
+    /// - Insufficient permissions to update the service
+    pub async fn update_service_desired_count(
+        &self,
+        cluster: &str,
+        service: &str,
+        desired_count: i32,
+    ) -> Result<()> {
+        self.client
+            .update_service()
+            .cluster(cluster)
+            .service(service)
+            .desired_count(desired_count)
+            .send()
+            .await
+            .context("Failed to update service desired count")?;
+
+        Ok(())
+    }
+
+    /// Updates the task definition for a service.
+    ///
+    /// Changes the service to use a different task definition revision.
+    /// This triggers a new deployment with the updated task definition.
+    ///
+    /// # Arguments
+    /// * `cluster` - The cluster name or ARN
+    /// * `service` - The service name or ARN
+    /// * `task_definition` - The task definition ARN or family:revision
+    ///
+    /// # Returns
+    /// Returns `Ok(())` on success
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The AWS UpdateService API call fails
+    /// - The service or task definition doesn't exist
+    /// - Insufficient permissions to update the service
+    pub async fn update_service_task_definition(
+        &self,
+        cluster: &str,
+        service: &str,
+        task_definition: &str,
+    ) -> Result<()> {
+        self.client
+            .update_service()
+            .cluster(cluster)
+            .service(service)
+            .task_definition(task_definition)
+            .send()
+            .await
+            .context("Failed to update service task definition")?;
+
+        Ok(())
+    }
+
+    /// Lists all revisions of a task definition family.
+    ///
+    /// Retrieves all task definition revisions for the specified family,
+    /// sorted by revision number (newest first).
+    ///
+    /// # Arguments
+    /// * `family` - The task definition family name
+    ///
+    /// # Returns
+    /// A vector of task definition ARNs, sorted by revision (newest first)
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - The AWS ListTaskDefinitions API call fails
+    /// - Insufficient permissions to list task definitions
+    pub async fn list_task_definition_revisions(&self, family: &str) -> Result<Vec<String>> {
+        let resp = self
+            .client
+            .list_task_definitions()
+            .family_prefix(family)
+            .sort(aws_sdk_ecs::types::SortOrder::Desc)
+            .send()
+            .await
+            .context("Failed to list task definition revisions")?;
+
+        Ok(resp.task_definition_arns().to_vec())
+    }
+
     /// Stops a specific task in a cluster.
     ///
     /// Sends a stop request to ECS, which will terminate the task containers.
