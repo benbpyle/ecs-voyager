@@ -754,13 +754,15 @@ impl App {
                         );
                     }
                     Err(e) => {
-                        self.status_message = format!("Error loading task definition families: {e}");
+                        self.status_message =
+                            format!("Error loading task definition families: {e}");
                     }
                 }
             }
             AppState::TaskDefinitionDetail => {
                 // Placeholder - will be implemented with full task definition viewer
-                self.status_message = "Task definition detail refresh not yet implemented".to_string();
+                self.status_message =
+                    "Task definition detail refresh not yet implemented".to_string();
             }
         }
 
@@ -1517,18 +1519,16 @@ impl App {
         }
 
         // Only allow editing when we have a selected service
-        if self.selected_service.is_none() || self.selected_cluster.is_none() {
+        let (Some(cluster), Some(service_name)) = (
+            self.selected_cluster.as_ref(),
+            self.selected_service.as_ref(),
+        ) else {
             self.status_message = "No service selected".to_string();
             return Ok(());
-        }
+        };
 
         // Find the selected service to get current task definition
         if let Some(service) = self.services.get(self.selected_index) {
-            // Extract task definition family from the service
-            // We'll need to get the full service details to know the task definition
-            let cluster = self.selected_cluster.as_ref().unwrap();
-            let service_name = self.selected_service.as_ref().unwrap();
-
             // Initialize editor with current values
             self.service_editor_desired_count_input = service.desired_count.to_string();
             self.service_editor_editing_field = 0; // Start editing desired count

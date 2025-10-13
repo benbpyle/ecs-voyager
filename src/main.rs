@@ -191,7 +191,8 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
 
                                         app.status_message = format!("Port forwarding failed: {e}");
                                     } else {
-                                        app.status_message = "Port forwarding session ended".to_string();
+                                        app.status_message =
+                                            "Port forwarding session ended".to_string();
                                     }
 
                                     // Resume TUI
@@ -290,7 +291,10 @@ async fn run_app<B: ratatui::backend::Backend + std::io::Write>(
                             KeyCode::Char('/') => {
                                 // Enable search in list views or log search in logs view
                                 match app.state {
-                                    AppState::Clusters | AppState::Services | AppState::Tasks | AppState::TaskDefinitions => {
+                                    AppState::Clusters
+                                    | AppState::Services
+                                    | AppState::Tasks
+                                    | AppState::TaskDefinitions => {
                                         app.enter_search_mode();
                                     }
                                     AppState::Logs => {

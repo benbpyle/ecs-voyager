@@ -40,10 +40,10 @@ pub fn draw(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),                     // Header
-            Constraint::Length(info_header_height),    // Info header (context)
-            Constraint::Min(0),                        // Content
-            Constraint::Length(5),                     // Footer (multi-line)
+            Constraint::Length(3),                  // Header
+            Constraint::Length(info_header_height), // Info header (context)
+            Constraint::Min(0),                     // Content
+            Constraint::Length(5),                  // Footer (multi-line)
         ])
         .split(f.area());
 
@@ -110,7 +110,12 @@ fn draw_header(f: &mut Frame, area: Rect, app: &App) {
         AppState::Clusters => "ECS Voyager - Clusters",
         AppState::Services => {
             if let Some(cluster) = &app.selected_cluster {
-                return draw_custom_header(f, area, &format!("ECS Voyager - Services ({cluster})"), app);
+                return draw_custom_header(
+                    f,
+                    area,
+                    &format!("ECS Voyager - Services ({cluster})"),
+                    app,
+                );
             }
             "ECS Voyager - Services"
         }
@@ -226,10 +231,7 @@ fn draw_info_header(f: &mut Frame, area: Rect, app: &App) {
         }
         AppState::Services => {
             // Show cluster info, service counts and aggregates
-            let cluster_name = app
-                .selected_cluster
-                .as_deref()
-                .unwrap_or("None selected");
+            let cluster_name = app.selected_cluster.as_deref().unwrap_or("None selected");
             let total_services = app.services.len();
 
             // Calculate aggregate stats
@@ -286,16 +288,10 @@ fn draw_info_header(f: &mut Frame, area: Rect, app: &App) {
                 Line::from(vec![
                     Span::styled("Tasks: ", Style::default().fg(Color::Gray)),
                     Span::styled("Desired: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        total_desired.to_string(),
-                        Style::default().fg(Color::White),
-                    ),
+                    Span::styled(total_desired.to_string(), Style::default().fg(Color::White)),
                     Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
                     Span::styled("Running: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        total_running.to_string(),
-                        Style::default().fg(Color::Green),
-                    ),
+                    Span::styled(total_running.to_string(), Style::default().fg(Color::Green)),
                     Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
                     Span::styled("Pending: ", Style::default().fg(Color::DarkGray)),
                     Span::styled(
@@ -313,14 +309,8 @@ fn draw_info_header(f: &mut Frame, area: Rect, app: &App) {
         }
         AppState::Tasks => {
             // Show service info, task counts by status
-            let cluster_name = app
-                .selected_cluster
-                .as_deref()
-                .unwrap_or("None selected");
-            let service_name = app
-                .selected_service
-                .as_deref()
-                .unwrap_or("None selected");
+            let cluster_name = app.selected_cluster.as_deref().unwrap_or("None selected");
+            let service_name = app.selected_service.as_deref().unwrap_or("None selected");
             let total_tasks = app.tasks.len();
 
             // Count by status
@@ -369,10 +359,7 @@ fn draw_info_header(f: &mut Frame, area: Rect, app: &App) {
                     ),
                     Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
                     Span::styled("Running: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        running_count.to_string(),
-                        Style::default().fg(Color::Green),
-                    ),
+                    Span::styled(running_count.to_string(), Style::default().fg(Color::Green)),
                     Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
                     Span::styled("Pending: ", Style::default().fg(Color::DarkGray)),
                     Span::styled(
@@ -381,10 +368,7 @@ fn draw_info_header(f: &mut Frame, area: Rect, app: &App) {
                     ),
                     Span::styled("  |  ", Style::default().fg(Color::DarkGray)),
                     Span::styled("Stopped: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        stopped_count.to_string(),
-                        Style::default().fg(Color::Red),
-                    ),
+                    Span::styled(stopped_count.to_string(), Style::default().fg(Color::Red)),
                     if other_count > 0 {
                         Span::styled(
                             format!("  |  Other: {other_count}"),
@@ -441,10 +425,7 @@ fn draw_info_header(f: &mut Frame, area: Rect, app: &App) {
                                 .add_modifier(Modifier::BOLD),
                         ),
                         if app.auto_tail {
-                            Span::styled(
-                                "  |  Auto-Tail: ON",
-                                Style::default().fg(Color::Green),
-                            )
+                            Span::styled("  |  Auto-Tail: ON", Style::default().fg(Color::Green))
                         } else {
                             Span::styled(
                                 "  |  Auto-Tail: OFF",
@@ -1164,7 +1145,7 @@ fn draw_logs(f: &mut Frame, area: Rect, app: &App) {
 /// * `area` - The rectangular area allocated for the metrics view
 /// * `app` - The application state containing metrics data
 fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
-    if app.metrics.is_none() {
+    let Some(metrics) = app.metrics.as_ref() else {
         let no_metrics = Paragraph::new("No metrics available for this service.\n\nThis could mean:\n- The service has no CloudWatch metrics enabled\n- The service hasn't been running long enough to generate metrics\n- There was an error fetching metrics\n\nPress 'm' from Services view to load metrics")
             .style(Style::default().fg(Color::Yellow))
             .block(
@@ -1175,9 +1156,7 @@ fn draw_metrics(f: &mut Frame, area: Rect, app: &App) {
             .wrap(Wrap { trim: false });
         f.render_widget(no_metrics, area);
         return;
-    }
-
-    let metrics = app.metrics.as_ref().unwrap();
+    };
 
     // Split area into alarms section and charts section
     let chunks = Layout::default()
@@ -1738,7 +1717,7 @@ fn get_spinner() -> &'static str {
     // Get current time in milliseconds and cycle through spinner frames
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_millis();
 
     let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
